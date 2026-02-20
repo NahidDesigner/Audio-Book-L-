@@ -1,0 +1,5 @@
+{
+  "name": "Lumina Audiobooks",
+  "description": "A high-end text-to-audiobook platform that transforms your written chapters into immersive narrated experiences using Gemini's advanced TTS technology.",
+  "requestFramePermissions": []
+}
