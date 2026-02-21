@@ -1,14 +1,17 @@
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 import { google } from 'googleapis';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import { Readable } from 'stream';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 dotenv.config();
 
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
@@ -169,14 +172,25 @@ app.get('/api/drive/stream/:fileId', async (req, res) => {
 });
 
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  const isDev =
+    process.env.NODE_ENV === 'development' ||
+    process.env.npm_lifecycle_event === 'dev';
+
+  if (isDev) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static('dist'));
+    const distPath = path.join(__dirname, 'dist');
+    app.use(express.static(distPath));
+
+    // SPA fallback for non-API routes.
+    app.get(/^\/(?!api\/).*/, (_req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
