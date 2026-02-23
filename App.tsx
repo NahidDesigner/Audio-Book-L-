@@ -36,18 +36,6 @@ import { clearLocalCache, loadBooks, saveBooks } from './services/storageService
 import { Book, Chapter, Part, VOICES, VoiceName } from './types';
 import { makeId, pcmBase64ToMp3Base64, safeFileName } from './utils/audioUtils';
 
-const seedBook: Book = {
-  id: makeId('book'),
-  title: 'The Bronze Observatory',
-  author: 'Nadia Quinn',
-  description:
-    'A clockwork city where memories are stored in starlight and every chapter has a different voice.',
-  coverUrl:
-    'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=900&q=80',
-  chapters: [],
-  createdAt: Date.now(),
-};
-
 type DeleteTarget =
   | { type: 'book'; id: string }
   | { type: 'chapter'; id: string }
@@ -69,27 +57,10 @@ type PartModalState =
   | { mode: 'add' }
   | { mode: 'edit'; id: string };
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    promise
-      .then((value) => {
-        window.clearTimeout(timer);
-        resolve(value);
-      })
-      .catch((error) => {
-        window.clearTimeout(timer);
-        reject(error);
-      });
-  });
-}
-
 const App: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [initialLoadFailed, setInitialLoadFailed] = useState(false);
 
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
@@ -140,86 +111,49 @@ const App: React.FC = () => {
   );
 
   useEffect(() => {
-    let cancelled = false;
-    const startupGuard = window.setTimeout(() => {
-      if (cancelled) {
-        return;
-      }
-      console.warn('Startup load guard triggered. Falling back to seed book.');
-      setBooks((prev) => (prev.length > 0 ? prev : [seedBook]));
-      setLoaded(true);
-    }, 12000);
-
     const initialize = async () => {
       try {
-        const storedBooks = await withTimeout(loadBooks(), 8000, 'Loading books');
-        if (cancelled) {
-          return;
-        }
-        setBooks(storedBooks.length > 0 ? storedBooks : [seedBook]);
+        const storedBooks = await loadBooks();
+        setBooks(storedBooks);
+        setInitialLoadFailed(false);
       } catch (error) {
-        if (cancelled) {
-          return;
-        }
         console.error('Failed to load books:', error);
-        setBooks([seedBook]);
+        setBooks([]);
+        setInitialLoadFailed(true);
       } finally {
-        if (!cancelled) {
-          setLoaded(true);
-        }
-        window.clearTimeout(startupGuard);
+        setLoaded(true);
       }
     };
 
     initialize();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(startupGuard);
-    };
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const adminGuard = window.setTimeout(() => {
-      if (cancelled) {
-        return;
-      }
-      console.warn('Admin status check timed out. Continuing as public user.');
-      setIsAdmin(false);
-    }, 8000);
-
     const checkAdminStatus = async () => {
       try {
-        const status = await withTimeout(fetchAdminStatus(), 5000, 'Checking admin status');
-        if (cancelled) {
-          return;
-        }
+        const status = await fetchAdminStatus();
         setIsAdmin(status);
       } catch (error) {
-        if (cancelled) {
-          return;
-        }
         console.error('Failed to fetch admin status:', error);
         setIsAdmin(false);
       }
-      window.clearTimeout(adminGuard);
     };
 
     checkAdminStatus();
-    return () => {
-      cancelled = true;
-      window.clearTimeout(adminGuard);
-    };
   }, []);
 
   useEffect(() => {
     if (!loaded) {
       return;
     }
+    if (initialLoadFailed && books.length === 0) {
+      return;
+    }
+
     saveBooks(books).catch((error) => {
       console.error('Failed to persist books:', error);
     });
-  }, [books, loaded]);
+  }, [books, loaded, initialLoadFailed]);
 
   useEffect(() => {
     const checkDrive = async () => {
@@ -929,6 +863,12 @@ const App: React.FC = () => {
       </header>
 
       <main className="main-layout">
+        {initialLoadFailed && (
+          <p className="error-text">
+            Could not load shared library from Supabase. Check Supabase availability and redeploy settings.
+          </p>
+        )}
+
         {!selectedBook && (
           <section>
             <div className="section-header">

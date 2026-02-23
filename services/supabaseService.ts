@@ -8,10 +8,31 @@ interface LibraryRow {
 }
 
 const TABLE_NAME = 'lumina_library';
-const DEVICE_ID_KEY = 'lumina_device_id';
+const LEGACY_DEVICE_ID_KEY = 'lumina_device_id';
+const DEFAULT_SHARED_LIBRARY_KEY = 'public-library';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY;
+const sharedLibraryKey =
+  (import.meta.env.VITE_LIBRARY_KEY as string | undefined)?.trim() || DEFAULT_SHARED_LIBRARY_KEY;
+
+function withTimeout<T>(promiseLike: PromiseLike<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    Promise.resolve(promiseLike)
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
 
 let client: SupabaseClient | null = null;
 if (supabaseUrl && supabaseKey) {
@@ -23,21 +44,42 @@ if (supabaseUrl && supabaseKey) {
   });
 }
 
-function createDeviceId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
+function getLegacyDeviceId(): string | null {
+  try {
+    return localStorage.getItem(LEGACY_DEVICE_ID_KEY);
+  } catch {
+    return null;
   }
-  return `device-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function getDeviceId(): string {
-  const existing = localStorage.getItem(DEVICE_ID_KEY);
-  if (existing) {
-    return existing;
+async function fetchBooksByKey(key: string): Promise<Book[] | null> {
+  if (!client) {
+    return null;
   }
-  const nextId = createDeviceId();
-  localStorage.setItem(DEVICE_ID_KEY, nextId);
-  return nextId;
+
+  const response = (await withTimeout(
+    client
+      .from(TABLE_NAME)
+      .select('books')
+      .eq('device_id', key)
+      .maybeSingle<Pick<LibraryRow, 'books'>>(),
+    7000,
+    `Supabase load (${key})`
+  )) as { data: Pick<LibraryRow, 'books'> | null; error: { message: string } | null };
+  const { data, error } = response;
+
+  if (error) {
+    throw new Error(`Supabase load failed: ${error.message}`);
+  }
+
+  if (!data) {
+    return null;
+  }
+  if (!Array.isArray(data.books)) {
+    return [];
+  }
+
+  return data.books;
 }
 
 export function isSupabaseConfigured(): boolean {
@@ -49,22 +91,25 @@ export async function loadBooksFromSupabase(): Promise<Book[] | null> {
     return null;
   }
 
-  const deviceId = getDeviceId();
-  const { data, error } = await client
-    .from(TABLE_NAME)
-    .select('books')
-    .eq('device_id', deviceId)
-    .maybeSingle<Pick<LibraryRow, 'books'>>();
-
-  if (error) {
-    throw new Error(`Supabase load failed: ${error.message}`);
+  const sharedBooks = await fetchBooksByKey(sharedLibraryKey);
+  if (sharedBooks && sharedBooks.length > 0) {
+    return sharedBooks;
   }
 
-  if (!data || !Array.isArray(data.books)) {
-    return [];
+  const legacyDeviceId = getLegacyDeviceId();
+  if (legacyDeviceId && legacyDeviceId !== sharedLibraryKey) {
+    const legacyBooks = await fetchBooksByKey(legacyDeviceId);
+    if (legacyBooks && legacyBooks.length > 0) {
+      await saveBooksToSupabase(legacyBooks);
+      return legacyBooks;
+    }
   }
 
-  return data.books;
+  if (sharedBooks) {
+    return sharedBooks;
+  }
+
+  return [];
 }
 
 export async function saveBooksToSupabase(books: Book[]): Promise<void> {
@@ -72,18 +117,22 @@ export async function saveBooksToSupabase(books: Book[]): Promise<void> {
     return;
   }
 
-  const deviceId = getDeviceId();
-  const { error } = await client.from(TABLE_NAME).upsert(
-    {
-      device_id: deviceId,
-      books,
-      updated_at: new Date().toISOString(),
-    },
-    {
-      onConflict: 'device_id',
-      ignoreDuplicates: false,
-    }
-  );
+  const response = (await withTimeout(
+    client.from(TABLE_NAME).upsert(
+      {
+        device_id: sharedLibraryKey,
+        books,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'device_id',
+        ignoreDuplicates: false,
+      }
+    ),
+    7000,
+    'Supabase save'
+  )) as { error: { message: string } | null };
+  const { error } = response;
 
   if (error) {
     throw new Error(`Supabase save failed: ${error.message}`);

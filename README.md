@@ -11,7 +11,7 @@ Lumina Studio is a mobile-first audiobook creation app.
 - Play parts individually or autoplay chapter queue
 - Analyze chapters with Gemini summary + questions
 - Upload generated MP3 files to Google Drive and stream them back
-- Persist library in Supabase (if configured), with IndexedDB fallback
+- Persist shared library in Supabase (same data for all visitors)
 
 ## Tech Stack
 
@@ -20,7 +20,6 @@ Lumina Studio is a mobile-first audiobook creation app.
 - Gemini API (`@google/genai`) for TTS and analysis
 - Google Drive OAuth + Drive file API
 - Supabase (`@supabase/supabase-js`) for cloud persistence
-- IndexedDB fallback for offline/local persistence
 
 ## Environment
 
@@ -39,12 +38,11 @@ Required backend variables:
 - `ADMIN_PASSWORD`
 - `ADMIN_SESSION_SECRET`
 
-Optional frontend build variables:
+Required frontend build variables:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY`
-
-If Supabase variables are not set, the app still works with IndexedDB only.
+- `VITE_LIBRARY_KEY` (default: `public-library`)
 
 ## Supabase Setup
 
@@ -68,6 +66,14 @@ with check (true);
 
 This policy allows anonymous read/write for publishable key usage.
 If you add auth later, replace policy with user-scoped rules.
+
+Seed a shared row once (or set your own `VITE_LIBRARY_KEY` value):
+
+```sql
+insert into public.lumina_library (device_id, books)
+values ('public-library', '[]'::jsonb)
+on conflict (device_id) do nothing;
+```
 
 ## Google OAuth Setup
 
@@ -102,6 +108,7 @@ In Coolify:
 2. Set build args:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY`
+   - `VITE_LIBRARY_KEY=public-library`
 3. Set runtime env vars:
    - `GEMINI_API_KEY`
    - `CLIENT_ID`
