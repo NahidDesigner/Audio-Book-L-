@@ -246,10 +246,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           <audio
             ref={audioRef}
             src={sourceUrl}
-            controls
             playsInline
             preload="metadata"
-            className="native-audio"
+            className="hidden-audio"
+            aria-hidden="true"
           />
         </>
       )}

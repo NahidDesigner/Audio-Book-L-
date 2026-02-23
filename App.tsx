@@ -6,12 +6,14 @@ import {
   CheckCircle2,
   Cloud,
   CloudOff,
+  House,
   Loader2,
   LogIn,
   LogOut,
   PencilLine,
   Play,
   Plus,
+  RefreshCcw,
   Shield,
   Sparkles,
   Trash2,
@@ -30,7 +32,7 @@ import {
   logoutAdmin,
   uploadAudioToDrive,
 } from './services/apiService';
-import { loadBooks, saveBooks } from './services/storageService';
+import { clearLocalCache, loadBooks, saveBooks } from './services/storageService';
 import { Book, Chapter, Part, VOICES, VoiceName } from './types';
 import { makeId, pcmBase64ToMp3Base64, safeFileName } from './utils/audioUtils';
 
@@ -83,6 +85,7 @@ const App: React.FC = () => {
   const [adminPassword, setAdminPassword] = useState('');
   const [adminAuthError, setAdminAuthError] = useState('');
   const [isAdminAuthBusy, setIsAdminAuthBusy] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
 
   const [isDriveConnected, setIsDriveConnected] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
@@ -559,6 +562,37 @@ const App: React.FC = () => {
     }
   };
 
+  const goHome = () => {
+    setSelectedBookId(null);
+    setSelectedChapterId(null);
+    setActivePartId(null);
+  };
+
+  const handleClearCache = async () => {
+    const confirmed = window.confirm(
+      'Clear browser cache and local app cache, then reload?\nUnsynced local changes in this browser may be removed.'
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsClearingCache(true);
+    try {
+      await clearLocalCache();
+
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((key) => caches.delete(key)));
+      }
+
+      sessionStorage.clear();
+      window.location.reload();
+    } catch (error: any) {
+      setIsClearingCache(false);
+      alert(error?.message || 'Failed to clear cache. Try closing other tabs and retry.');
+    }
+  };
+
   const connectDrive = async () => {
     if (!isAdmin) {
       return;
@@ -790,9 +824,22 @@ const App: React.FC = () => {
         </div>
 
         <div className="topbar-actions">
+          <button
+            className="soft-btn"
+            onClick={goHome}
+            disabled={!selectedBookId && !selectedChapterId}
+          >
+            <House size={15} /> Home
+          </button>
+
           <button className="soft-btn" onClick={() => setAutoplayEnabled((prev) => !prev)}>
             {autoplayEnabled ? <CheckCircle2 size={15} /> : <CloudOff size={15} />}
             Autoplay {autoplayEnabled ? 'On' : 'Off'}
+          </button>
+
+          <button className="soft-btn" onClick={handleClearCache} disabled={isClearingCache}>
+            {isClearingCache ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
+            Clear Cache
           </button>
 
           {isAdmin && (

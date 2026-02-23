@@ -34,13 +34,17 @@ async function loadBooksFromIndexedDb(): Promise<Book[]> {
 
     request.onsuccess = () => {
       const value = request.result;
+      db.close();
       if (Array.isArray(value)) {
         resolve(value as Book[]);
       } else {
         resolve([]);
       }
     };
-    request.onerror = () => reject(new Error('Failed to load books from IndexedDB.'));
+    request.onerror = () => {
+      db.close();
+      reject(new Error('Failed to load books from IndexedDB.'));
+    };
   });
 }
 
@@ -51,8 +55,23 @@ async function saveBooksToIndexedDb(books: Book[]): Promise<void> {
     const store = tx.objectStore(STORE_NAME);
     store.put(books, ROOT_KEY);
 
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(new Error('Failed to save books to IndexedDB.'));
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(new Error('Failed to save books to IndexedDB.'));
+    };
+  });
+}
+
+function clearIndexedDb(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(DB_NAME);
+    request.onerror = () => reject(new Error('Failed to clear IndexedDB cache.'));
+    request.onsuccess = () => resolve();
+    request.onblocked = () => reject(new Error('IndexedDB clear is blocked by an open tab.'));
   });
 }
 
@@ -82,4 +101,8 @@ export async function saveBooks(books: Book[]): Promise<void> {
       console.error(error);
     }
   }
+}
+
+export async function clearLocalCache(): Promise<void> {
+  await clearIndexedDb();
 }

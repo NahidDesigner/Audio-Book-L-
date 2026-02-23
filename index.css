@@ -356,8 +356,8 @@ button {
   padding: 4px 8px;
 }
 
-.native-audio {
-  width: 100%;
+.hidden-audio {
+  display: none;
 }
 
 .progress-wrap p {
