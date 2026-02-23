@@ -26,7 +26,7 @@ import {
 } from './services/apiService';
 import { loadBooks, saveBooks } from './services/storageService';
 import { Book, Chapter, Part, VOICES, VoiceName } from './types';
-import { makeId, safeFileName } from './utils/audioUtils';
+import { makeId, pcmBase64ToMp3Base64, safeFileName } from './utils/audioUtils';
 
 const seedBook: Book = {
   id: makeId('book'),
@@ -502,7 +502,12 @@ const App: React.FC = () => {
     }, 450);
 
     try {
-      const audioBase64 = await generateTtsAudio(targetPart.content, targetPart.voiceName);
+      const ttsPayload = await generateTtsAudio(targetPart.content, targetPart.voiceName);
+      const audioBase64 = pcmBase64ToMp3Base64(
+        ttsPayload.pcmBase64,
+        ttsPayload.sampleRate,
+        ttsPayload.channels
+      );
 
       if (isDriveConnected) {
         updateSelectedPart(partId, { progress: 96 });

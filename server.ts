@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 import express from 'express';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import { google } from 'googleapis';
-import * as lamejs from 'lamejs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
@@ -116,59 +115,6 @@ function decodeState(value: string): OAuthStatePayload {
   return parsed;
 }
 
-function pcmBase64ToMp3Base64(pcmBase64: string, sampleRate = 24000, channels = 1): string {
-  const pcmBuffer = Buffer.from(pcmBase64, 'base64');
-  const pcmInt16 = new Int16Array(
-    pcmBuffer.buffer,
-    pcmBuffer.byteOffset,
-    Math.floor(pcmBuffer.byteLength / 2)
-  );
-
-  const mp3Encoder = new (lamejs as any).Mp3Encoder(channels, sampleRate, 128);
-  const sampleBlockSize = 1152;
-  const chunks: Uint8Array[] = [];
-
-  if (channels === 1) {
-    for (let i = 0; i < pcmInt16.length; i += sampleBlockSize) {
-      const chunk = pcmInt16.subarray(i, i + sampleBlockSize);
-      const encoded = mp3Encoder.encodeBuffer(chunk);
-      if (encoded.length > 0) {
-        chunks.push(new Uint8Array(encoded));
-      }
-    }
-  } else {
-    for (let i = 0; i < pcmInt16.length; i += sampleBlockSize * channels) {
-      const interleaved = pcmInt16.subarray(i, i + sampleBlockSize * channels);
-      const frameLen = Math.floor(interleaved.length / channels);
-      const left = new Int16Array(frameLen);
-      const right = new Int16Array(frameLen);
-      for (let j = 0; j < frameLen; j += 1) {
-        left[j] = interleaved[j * 2] || 0;
-        right[j] = interleaved[j * 2 + 1] || 0;
-      }
-      const encoded = mp3Encoder.encodeBuffer(left, right);
-      if (encoded.length > 0) {
-        chunks.push(new Uint8Array(encoded));
-      }
-    }
-  }
-
-  const finalChunk = mp3Encoder.flush();
-  if (finalChunk.length > 0) {
-    chunks.push(new Uint8Array(finalChunk));
-  }
-
-  const totalLength = chunks.reduce((acc, item) => acc + item.length, 0);
-  const merged = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return Buffer.from(merged).toString('base64');
-}
-
 function getDriveService(req: express.Request) {
   const tokensString = req.cookies[DRIVE_TOKEN_COOKIE];
   if (!tokensString) {
@@ -233,11 +179,9 @@ app.post('/api/tts', async (req, res) => {
       return jsonError(res, 502, 'Gemini did not return audio data.');
     }
 
-    const mp3Base64 = pcmBase64ToMp3Base64(pcmBase64, 24000, 1);
-
     res.json({
-      audioBase64: mp3Base64,
-      mimeType: 'audio/mpeg',
+      pcmBase64,
+      mimeType: 'audio/pcm',
       sampleRate: 24000,
       channels: 1,
     });

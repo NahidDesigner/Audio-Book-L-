@@ -20,15 +20,23 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function generateTtsAudio(text: string, voiceName: VoiceName): Promise<string> {
+export interface TtsAudioPayload {
+  pcmBase64: string;
+  sampleRate: number;
+  channels: number;
+}
+
+export async function generateTtsAudio(
+  text: string,
+  voiceName: VoiceName
+): Promise<TtsAudioPayload> {
   const response = await fetch('/api/tts', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, voiceName }),
   });
 
-  const data = await parseResponse<{ audioBase64: string }>(response);
-  return data.audioBase64;
+  return parseResponse<TtsAudioPayload>(response);
 }
 
 export async function analyzeChapter(chapterTitle: string, fullText: string): Promise<ChapterInsights> {
