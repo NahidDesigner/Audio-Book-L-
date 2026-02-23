@@ -69,6 +69,24 @@ type PartModalState =
   | { mode: 'add' }
   | { mode: 'edit'; id: string };
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        window.clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
 const App: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -79,7 +97,6 @@ const App: React.FC = () => {
   const [autoplayEnabled, setAutoplayEnabled] = useState(true);
 
   const [isAdmin, setIsAdmin] = useState(false);
-  const [isCheckingAdmin, setIsCheckingAdmin] = useState(true);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [adminEmail, setAdminEmail] = useState('nahidwebdesigner@gmail.com');
   const [adminPassword, setAdminPassword] = useState('');
@@ -123,35 +140,76 @@ const App: React.FC = () => {
   );
 
   useEffect(() => {
+    let cancelled = false;
+    const startupGuard = window.setTimeout(() => {
+      if (cancelled) {
+        return;
+      }
+      console.warn('Startup load guard triggered. Falling back to seed book.');
+      setBooks((prev) => (prev.length > 0 ? prev : [seedBook]));
+      setLoaded(true);
+    }, 12000);
+
     const initialize = async () => {
       try {
-        const storedBooks = await loadBooks();
+        const storedBooks = await withTimeout(loadBooks(), 8000, 'Loading books');
+        if (cancelled) {
+          return;
+        }
         setBooks(storedBooks.length > 0 ? storedBooks : [seedBook]);
       } catch (error) {
+        if (cancelled) {
+          return;
+        }
         console.error('Failed to load books:', error);
         setBooks([seedBook]);
       } finally {
-        setLoaded(true);
+        if (!cancelled) {
+          setLoaded(true);
+        }
+        window.clearTimeout(startupGuard);
       }
     };
 
     initialize();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(startupGuard);
+    };
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    const adminGuard = window.setTimeout(() => {
+      if (cancelled) {
+        return;
+      }
+      console.warn('Admin status check timed out. Continuing as public user.');
+      setIsAdmin(false);
+    }, 8000);
+
     const checkAdminStatus = async () => {
       try {
-        const status = await fetchAdminStatus();
+        const status = await withTimeout(fetchAdminStatus(), 5000, 'Checking admin status');
+        if (cancelled) {
+          return;
+        }
         setIsAdmin(status);
       } catch (error) {
+        if (cancelled) {
+          return;
+        }
         console.error('Failed to fetch admin status:', error);
         setIsAdmin(false);
-      } finally {
-        setIsCheckingAdmin(false);
       }
+      window.clearTimeout(adminGuard);
     };
 
     checkAdminStatus();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(adminGuard);
+    };
   }, []);
 
   useEffect(() => {
@@ -803,7 +861,7 @@ const App: React.FC = () => {
     setActivePartId(null);
   }, [autoplayEnabled, canPlayPart, selectedChapter, activePartId]);
 
-  if (!loaded || isCheckingAdmin) {
+  if (!loaded) {
     return (
       <div className="app-loading">
         <Loader2 className="spin" size={42} />
