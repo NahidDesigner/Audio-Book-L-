@@ -1,13 +1,16 @@
+export const VOICES = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'] as const;
+
+export type VoiceName = (typeof VOICES)[number];
 
 export interface Part {
   id: string;
   title: string;
   content: string;
+  voiceName: VoiceName;
   audioBase64?: string;
   driveFileId?: string;
-  voiceName: string;
   isGenerating: boolean;
-  progress?: number;
+  progress: number;
   error?: string;
 }
 
@@ -30,10 +33,7 @@ export interface Book {
   createdAt: number;
 }
 
-export enum Voice {
-  KORE = 'Kore',
-  PUCK = 'Puck',
-  CHARON = 'Charon',
-  FENRIR = 'Fenrir',
-  ZEPHYR = 'Zephyr'
+export interface ChapterInsights {
+  summary: string;
+  questions: string[];
 }

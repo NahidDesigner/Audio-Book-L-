@@ -1,53 +1,85 @@
-
 import { Book } from '../types';
+import {
+  isSupabaseConfigured,
+  loadBooksFromSupabase,
+  saveBooksToSupabase,
+} from './supabaseService';
 
-const DB_NAME = 'LuminaDB';
-const STORE_NAME = 'books';
+const DB_NAME = 'lumina-library-db';
 const DB_VERSION = 1;
+const STORE_NAME = 'library';
+const ROOT_KEY = 'books';
 
-export const initDB = (): Promise<IDBDatabase> => {
+function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onerror = () => reject('Failed to open IndexedDB');
+    request.onerror = () => reject(new Error('Failed to open IndexedDB.'));
     request.onsuccess = () => resolve(request.result);
-
-    request.onupgradeneeded = (event: any) => {
-      const db = event.target.result;
+    request.onupgradeneeded = () => {
+      const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+        db.createObjectStore(STORE_NAME);
       }
     };
   });
-};
+}
 
-export const saveBooks = async (books: Book[]): Promise<void> => {
-  const db = await initDB();
+async function loadBooksFromIndexedDb(): Promise<Book[]> {
+  const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.get(ROOT_KEY);
 
-    // Clear and re-save is simpler for this app's scale
-    const clearRequest = store.clear();
-    clearRequest.onsuccess = () => {
-      books.forEach((book) => {
-        store.add(book);
-      });
+    request.onsuccess = () => {
+      const value = request.result;
+      if (Array.isArray(value)) {
+        resolve(value as Book[]);
+      } else {
+        resolve([]);
+      }
     };
-
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject('Failed to save books to IndexedDB');
+    request.onerror = () => reject(new Error('Failed to load books from IndexedDB.'));
   });
-};
+}
 
-export const loadBooks = async (): Promise<Book[]> => {
-  const db = await initDB();
+async function saveBooksToIndexedDb(books: Book[]): Promise<void> {
+  const db = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORE_NAME, 'readonly');
-    const store = transaction.objectStore(STORE_NAME);
-    const request = store.getAll();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    store.put(books, ROOT_KEY);
 
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject('Failed to load books from IndexedDB');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(new Error('Failed to save books to IndexedDB.'));
   });
-};
+}
+
+export async function loadBooks(): Promise<Book[]> {
+  if (isSupabaseConfigured()) {
+    try {
+      const remoteBooks = await loadBooksFromSupabase();
+      if (remoteBooks) {
+        await saveBooksToIndexedDb(remoteBooks);
+        return remoteBooks;
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  return loadBooksFromIndexedDb();
+}
+
+export async function saveBooks(books: Book[]): Promise<void> {
+  await saveBooksToIndexedDb(books);
+
+  if (isSupabaseConfigured()) {
+    try {
+      await saveBooksToSupabase(books);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+}

@@ -1,177 +1,471 @@
-import express from 'express';
-import { google } from 'googleapis';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
-import { Readable } from 'stream';
+import express from 'express';
+import { GoogleGenAI, Modality, Type } from '@google/genai';
+import { google } from 'googleapis';
+import * as lamejs from 'lamejs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import { Readable } from 'stream';
 
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
+
 const PORT = Number.parseInt(process.env.PORT || '3000', 10);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-app.use(express.json({ limit: '50mb' }));
+const OAUTH_STATE_COOKIE = 'lumina_oauth_state';
+const DRIVE_TOKEN_COOKIE = 'lumina_drive_tokens';
+const DRIVE_FOLDER_NAME = 'Lumina Audiobooks';
+
+app.use(express.json({ limit: '20mb' }));
 app.use(cookieParser());
 
-const getOAuth2Client = (redirectUri: string) => {
-  return new google.auth.OAuth2(
-    process.env.CLIENT_ID,
-    process.env.CLIENT_SECRET,
-    redirectUri
+interface OAuthStatePayload {
+  nonce: string;
+  redirectUri: string;
+  appOrigin: string;
+}
+
+interface TtsRequestBody {
+  text: string;
+  voiceName: string;
+}
+
+interface AnalyzeRequestBody {
+  chapterTitle: string;
+  fullText: string;
+}
+
+interface UploadRequestBody {
+  base64Audio: string;
+  filename?: string;
+  mimeType?: string;
+}
+
+function jsonError(res: express.Response, status: number, message: string) {
+  res.status(status).json({ error: message });
+}
+
+function isSecureRequest(req: express.Request): boolean {
+  if (req.secure) {
+    return true;
+  }
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  if (typeof forwardedProto === 'string') {
+    return forwardedProto.split(',')[0].trim() === 'https';
+  }
+  return false;
+}
+
+function getCookieOptions(req: express.Request) {
+  return {
+    httpOnly: true,
+    secure: isSecureRequest(req),
+    sameSite: 'lax' as const,
+    path: '/',
+  };
+}
+
+function getGeminiClient(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('Missing GEMINI_API_KEY environment variable.');
+  }
+  return new GoogleGenAI({ apiKey });
+}
+
+function validateRedirectUri(redirectUri: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(redirectUri);
+  } catch {
+    throw new Error('Invalid redirectUri format.');
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('redirectUri must use http or https.');
+  }
+  return parsed;
+}
+
+function createOAuthClient(redirectUri: string) {
+  const clientId = process.env.CLIENT_ID;
+  const clientSecret = process.env.CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error('Missing CLIENT_ID or CLIENT_SECRET environment variable.');
+  }
+
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+}
+
+function encodeState(payload: OAuthStatePayload): string {
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+function decodeState(value: string): OAuthStatePayload {
+  const decoded = Buffer.from(value, 'base64url').toString('utf8');
+  const parsed = JSON.parse(decoded) as OAuthStatePayload;
+  if (!parsed.nonce || !parsed.redirectUri || !parsed.appOrigin) {
+    throw new Error('Invalid state payload.');
+  }
+  return parsed;
+}
+
+function pcmBase64ToMp3Base64(pcmBase64: string, sampleRate = 24000, channels = 1): string {
+  const pcmBuffer = Buffer.from(pcmBase64, 'base64');
+  const pcmInt16 = new Int16Array(
+    pcmBuffer.buffer,
+    pcmBuffer.byteOffset,
+    Math.floor(pcmBuffer.byteLength / 2)
   );
-};
+
+  const mp3Encoder = new (lamejs as any).Mp3Encoder(channels, sampleRate, 128);
+  const sampleBlockSize = 1152;
+  const chunks: Uint8Array[] = [];
+
+  if (channels === 1) {
+    for (let i = 0; i < pcmInt16.length; i += sampleBlockSize) {
+      const chunk = pcmInt16.subarray(i, i + sampleBlockSize);
+      const encoded = mp3Encoder.encodeBuffer(chunk);
+      if (encoded.length > 0) {
+        chunks.push(new Uint8Array(encoded));
+      }
+    }
+  } else {
+    for (let i = 0; i < pcmInt16.length; i += sampleBlockSize * channels) {
+      const interleaved = pcmInt16.subarray(i, i + sampleBlockSize * channels);
+      const frameLen = Math.floor(interleaved.length / channels);
+      const left = new Int16Array(frameLen);
+      const right = new Int16Array(frameLen);
+      for (let j = 0; j < frameLen; j += 1) {
+        left[j] = interleaved[j * 2] || 0;
+        right[j] = interleaved[j * 2 + 1] || 0;
+      }
+      const encoded = mp3Encoder.encodeBuffer(left, right);
+      if (encoded.length > 0) {
+        chunks.push(new Uint8Array(encoded));
+      }
+    }
+  }
+
+  const finalChunk = mp3Encoder.flush();
+  if (finalChunk.length > 0) {
+    chunks.push(new Uint8Array(finalChunk));
+  }
+
+  const totalLength = chunks.reduce((acc, item) => acc + item.length, 0);
+  const merged = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return Buffer.from(merged).toString('base64');
+}
+
+function getDriveService(req: express.Request) {
+  const tokensString = req.cookies[DRIVE_TOKEN_COOKIE];
+  if (!tokensString) {
+    throw new Error('Google Drive is not connected.');
+  }
+
+  const parsed = JSON.parse(tokensString);
+  const oauth = createOAuthClient('postmessage');
+  oauth.setCredentials(parsed);
+
+  return google.drive({ version: 'v3', auth: oauth });
+}
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.post('/api/tts', async (req, res) => {
+  try {
+    const { text, voiceName } = req.body as TtsRequestBody;
+
+    if (!text || !text.trim()) {
+      return jsonError(res, 400, 'text is required.');
+    }
+    if (!voiceName || !voiceName.trim()) {
+      return jsonError(res, 400, 'voiceName is required.');
+    }
+
+    const ai = getGeminiClient();
+    const isBengali = /[\u0980-\u09FF]/.test(text);
+    const narratorInstruction = isBengali
+      ? 'You are a professional Bengali audiobook narrator. Read naturally with proper pauses and clear articulation.'
+      : 'You are a professional audiobook narrator. Read naturally with clear pronunciation and pacing.';
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-preview-tts',
+      contents: [
+        {
+          parts: [
+            {
+              text: `${narratorInstruction}\n\n${text}`,
+            },
+          ],
+        },
+      ],
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName,
+            },
+          },
+        },
+      },
+    });
+
+    const audioPart = response.candidates?.[0]?.content?.parts?.find((part) => part.inlineData?.data);
+    const pcmBase64 = audioPart?.inlineData?.data;
+
+    if (!pcmBase64) {
+      return jsonError(res, 502, 'Gemini did not return audio data.');
+    }
+
+    const mp3Base64 = pcmBase64ToMp3Base64(pcmBase64, 24000, 1);
+
+    res.json({
+      audioBase64: mp3Base64,
+      mimeType: 'audio/mpeg',
+      sampleRate: 24000,
+      channels: 1,
+    });
+  } catch (error: any) {
+    console.error('TTS generation failed:', error);
+    jsonError(res, 500, error?.message || 'TTS generation failed.');
+  }
+});
+
+app.post('/api/analyze', async (req, res) => {
+  try {
+    const { chapterTitle, fullText } = req.body as AnalyzeRequestBody;
+
+    if (!chapterTitle || !fullText) {
+      return jsonError(res, 400, 'chapterTitle and fullText are required.');
+    }
+
+    const ai = getGeminiClient();
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `Analyze chapter "${chapterTitle}".\n\nIMPORTANT: Respond in the same language as the input text.\nReturn concise output with:\n1) summary\n2) exactly 3 discussion questions\n\nCHAPTER TEXT:\n${fullText}`,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          required: ['summary', 'questions'],
+          properties: {
+            summary: { type: Type.STRING },
+            questions: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+          },
+        },
+      },
+    });
+
+    const parsed = JSON.parse(response.text || '{}');
+    res.json(parsed);
+  } catch (error: any) {
+    console.error('Chapter analysis failed:', error);
+    jsonError(res, 500, error?.message || 'Chapter analysis failed.');
+  }
+});
 
 app.get('/api/auth/url', (req, res) => {
-  const redirectUri = req.query.redirectUri as string;
-  if (!redirectUri) return res.status(400).json({ error: 'Missing redirectUri' });
+  try {
+    const redirectUriParam = req.query.redirectUri;
+    if (typeof redirectUriParam !== 'string') {
+      return jsonError(res, 400, 'redirectUri query parameter is required.');
+    }
 
-  const oauth2Client = getOAuth2Client(redirectUri);
-  const state = Buffer.from(JSON.stringify({ redirectUri })).toString('base64');
+    const redirectUri = validateRedirectUri(redirectUriParam);
+    const nonce = crypto.randomBytes(16).toString('hex');
+    const appOrigin = redirectUri.origin;
 
-  const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/drive.file'],
-    state,
-    prompt: 'consent'
-  });
+    const statePayload: OAuthStatePayload = {
+      nonce,
+      redirectUri: redirectUri.toString(),
+      appOrigin,
+    };
+    const state = encodeState(statePayload);
 
-  res.json({ url });
+    const oauth = createOAuthClient(redirectUri.toString());
+    const authUrl = oauth.generateAuthUrl({
+      access_type: 'offline',
+      scope: ['https://www.googleapis.com/auth/drive.file'],
+      state,
+      prompt: 'consent',
+    });
+
+    res.cookie(OAUTH_STATE_COOKIE, state, {
+      ...getCookieOptions(req),
+      maxAge: 10 * 60 * 1000,
+    });
+
+    res.json({ url: authUrl });
+  } catch (error: any) {
+    console.error('Auth URL generation failed:', error);
+    jsonError(res, 500, error?.message || 'Could not create auth URL.');
+  }
 });
 
 app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
   try {
-    const { code, state } = req.query;
-    const { redirectUri } = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
-    
-    const oauth2Client = getOAuth2Client(redirectUri);
-    const { tokens } = await oauth2Client.getToken(code as string);
-    
-    res.cookie('google_tokens', JSON.stringify(tokens), {
-      secure: true,
-      sameSite: 'none',
-      httpOnly: true,
-      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+    const stateFromQuery = typeof req.query.state === 'string' ? req.query.state : '';
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
+
+    if (!stateFromQuery || !code) {
+      return res.status(400).send('Missing OAuth code or state.');
+    }
+
+    const stateFromCookie = req.cookies[OAUTH_STATE_COOKIE];
+    if (!stateFromCookie || stateFromCookie !== stateFromQuery) {
+      return res.status(400).send('Invalid OAuth state.');
+    }
+
+    const payload = decodeState(stateFromQuery);
+    const oauth = createOAuthClient(payload.redirectUri);
+    const tokenResponse = await oauth.getToken(code);
+
+    res.clearCookie(OAUTH_STATE_COOKIE, getCookieOptions(req));
+    res.cookie(DRIVE_TOKEN_COOKIE, JSON.stringify(tokenResponse.tokens), {
+      ...getCookieOptions(req),
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
+
+    const safeTargetOrigin = payload.appOrigin.replace(/'/g, '');
 
     res.send(`
       <html>
-        <body>
+        <body style="font-family: sans-serif; padding: 20px;">
+          <p>Google Drive connected. You can close this window.</p>
           <script>
             if (window.opener) {
-              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
+              window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '${safeTargetOrigin}');
               window.close();
-            } else {
-              window.location.href = '/';
             }
           </script>
-          <p>Authentication successful. This window should close automatically.</p>
         </body>
       </html>
     `);
   } catch (error) {
-    console.error('OAuth callback error:', error);
-    res.status(500).send('Authentication failed');
+    console.error('OAuth callback failed:', error);
+    res.status(500).send('Google authentication failed.');
   }
 });
 
 app.get('/api/auth/status', (req, res) => {
-  const tokens = req.cookies.google_tokens;
-  res.json({ connected: !!tokens });
+  res.json({ connected: Boolean(req.cookies[DRIVE_TOKEN_COOKIE]) });
 });
 
 app.post('/api/auth/logout', (req, res) => {
-  res.clearCookie('google_tokens', { secure: true, sameSite: 'none', httpOnly: true });
+  res.clearCookie(OAUTH_STATE_COOKIE, getCookieOptions(req));
+  res.clearCookie(DRIVE_TOKEN_COOKIE, getCookieOptions(req));
   res.json({ success: true });
 });
 
-const getDriveService = (req: express.Request, redirectUri: string = 'postmessage') => {
-  const tokensStr = req.cookies.google_tokens;
-  if (!tokensStr) throw new Error('Not authenticated');
-  const tokens = JSON.parse(tokensStr);
-  const oauth2Client = getOAuth2Client(redirectUri);
-  oauth2Client.setCredentials(tokens);
-  return google.drive({ version: 'v3', auth: oauth2Client });
-};
-
 app.post('/api/drive/upload', async (req, res) => {
   try {
-    const { base64Audio, filename, mimeType, redirectUri } = req.body;
-    const drive = getDriveService(req, redirectUri);
+    const { base64Audio, filename, mimeType } = req.body as UploadRequestBody;
 
-    const folderName = 'Lumina Audiobooks';
-    let folderId = '';
-    const folderRes = await drive.files.list({
-      q: `mimeType='application/vnd.google-apps.folder' and name='${folderName}' and trashed=false`,
-      fields: 'files(id, name)',
-      spaces: 'drive'
-    });
-
-    if (folderRes.data.files && folderRes.data.files.length > 0) {
-      folderId = folderRes.data.files[0].id!;
-    } else {
-      const newFolder = await drive.files.create({
-        requestBody: {
-          name: folderName,
-          mimeType: 'application/vnd.google-apps.folder'
-        },
-        fields: 'id'
-      });
-      folderId = newFolder.data.id!;
+    if (!base64Audio) {
+      return jsonError(res, 400, 'base64Audio is required.');
     }
 
-    const audioBuffer = Buffer.from(base64Audio, 'base64');
-    
-    const fileMetadata = {
-      name: filename || 'audio.mp3',
-      parents: [folderId]
-    };
-    
-    const media = {
-      mimeType: mimeType || 'audio/mpeg',
-      body: Readable.from(audioBuffer)
-    };
+    const drive = getDriveService(req);
 
-    const file = await drive.files.create({
-      requestBody: fileMetadata,
-      media: media,
-      fields: 'id'
+    const existingFolders = await drive.files.list({
+      q: `mimeType='application/vnd.google-apps.folder' and name='${DRIVE_FOLDER_NAME}' and trashed=false`,
+      fields: 'files(id, name)',
+      spaces: 'drive',
+      pageSize: 1,
     });
 
-    res.json({ fileId: file.data.id });
+    let folderId = existingFolders.data.files?.[0]?.id;
+
+    if (!folderId) {
+      const createdFolder = await drive.files.create({
+        requestBody: {
+          name: DRIVE_FOLDER_NAME,
+          mimeType: 'application/vnd.google-apps.folder',
+        },
+        fields: 'id',
+      });
+      folderId = createdFolder.data.id || undefined;
+    }
+
+    if (!folderId) {
+      return jsonError(res, 500, 'Could not resolve Drive destination folder.');
+    }
+
+    const contentBuffer = Buffer.from(base64Audio, 'base64');
+    const createdFile = await drive.files.create({
+      requestBody: {
+        name: filename || `lumina-${Date.now()}.mp3`,
+        parents: [folderId],
+      },
+      media: {
+        mimeType: mimeType || 'audio/mpeg',
+        body: Readable.from(contentBuffer),
+      },
+      fields: 'id,name,mimeType',
+    });
+
+    res.json({ fileId: createdFile.data.id });
   } catch (error: any) {
-    console.error('Drive upload error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Drive upload failed:', error);
+    jsonError(res, 500, error?.message || 'Drive upload failed.');
   }
 });
 
 app.get('/api/drive/stream/:fileId', async (req, res) => {
   try {
-    const drive = getDriveService(req);
     const fileId = req.params.fileId;
-    
-    const response = await drive.files.get(
+    if (!fileId) {
+      return jsonError(res, 400, 'fileId is required.');
+    }
+
+    const drive = getDriveService(req);
+    const metadata = await drive.files.get({
+      fileId,
+      fields: 'mimeType,name',
+    });
+
+    const mediaResponse = await drive.files.get(
       { fileId, alt: 'media' },
       { responseType: 'stream' }
     );
-    
-    res.setHeader('Content-Type', 'audio/wav');
-    response.data
-      .on('end', () => {})
-      .on('error', (err: any) => {
-        console.error('Error downloading file:', err);
-        res.status(500).end();
+
+    res.setHeader('Content-Type', metadata.data.mimeType || 'audio/mpeg');
+    res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+
+    mediaResponse.data
+      .on('error', (streamError: Error) => {
+        console.error('Drive stream failed:', streamError);
+        if (!res.headersSent) {
+          res.status(500).end();
+        }
       })
       .pipe(res);
   } catch (error: any) {
-    console.error('Drive stream error:', error);
-    res.status(500).json({ error: error.message });
+    console.error('Drive streaming failed:', error);
+    jsonError(res, 500, error?.message || 'Drive stream failed.');
   }
 });
 
-async function startServer() {
+async function bootstrap() {
   const isDev =
     process.env.NODE_ENV === 'development' ||
     process.env.npm_lifecycle_event === 'dev';
@@ -180,22 +474,24 @@ async function startServer() {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(__dirname, 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, { index: false }));
 
-    // SPA fallback for non-API routes.
-    app.get(/^\/(?!api\/).*/, (_req, res) => {
+    app.get(/^\/(?!api\/|auth\/).*/, (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Lumina server running on http://localhost:${PORT}`);
   });
 }
 
-startServer();
+bootstrap().catch((error) => {
+  console.error('Server bootstrap failed:', error);
+  process.exit(1);
+});
