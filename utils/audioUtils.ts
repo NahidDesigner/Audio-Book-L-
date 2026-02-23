@@ -1,5 +1,3 @@
-import * as lamejs from 'lamejs';
-
 export function base64ToBlob(base64: string, mimeType: string): Blob {
   const bytes = base64ToUint8Array(base64);
   return new Blob([bytes], { type: mimeType });
@@ -21,7 +19,56 @@ export function pcmBase64ToMp3Base64(
   pcmBase64: string,
   sampleRate = 24000,
   channels = 1
-): string {
+): Promise<string> {
+  return encodePcmToMp3(pcmBase64, sampleRate, channels);
+}
+
+type Mp3EncoderInstance = {
+  encodeBuffer: (left: Int16Array, right?: Int16Array) => Int8Array;
+  flush: () => Int8Array;
+};
+
+type LameJsGlobal = {
+  Mp3Encoder: new (channels: number, sampleRate: number, kbps: number) => Mp3EncoderInstance;
+};
+
+let lameLoadPromise: Promise<LameJsGlobal> | null = null;
+
+function loadLameJs(): Promise<LameJsGlobal> {
+  const existing = (window as any).lamejs as LameJsGlobal | undefined;
+  if (existing?.Mp3Encoder) {
+    return Promise.resolve(existing);
+  }
+
+  if (lameLoadPromise) {
+    return lameLoadPromise;
+  }
+
+  lameLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/lame.all.js';
+    script.async = true;
+    script.onload = () => {
+      const loaded = (window as any).lamejs as LameJsGlobal | undefined;
+      if (!loaded?.Mp3Encoder) {
+        reject(new Error('lamejs loaded but Mp3Encoder was not found.'));
+        return;
+      }
+      resolve(loaded);
+    };
+    script.onerror = () => reject(new Error('Failed to load /lame.all.js'));
+    document.head.appendChild(script);
+  });
+
+  return lameLoadPromise;
+}
+
+async function encodePcmToMp3(
+  pcmBase64: string,
+  sampleRate = 24000,
+  channels = 1
+): Promise<string> {
+  const lamejs = await loadLameJs();
   const pcmBytes = base64ToUint8Array(pcmBase64);
   const pcmSamples = new Int16Array(
     pcmBytes.buffer,
@@ -29,7 +76,7 @@ export function pcmBase64ToMp3Base64(
     Math.floor(pcmBytes.byteLength / 2)
   );
 
-  const encoder = new (lamejs as any).Mp3Encoder(channels, sampleRate, 128);
+  const encoder = new lamejs.Mp3Encoder(channels, sampleRate, 128);
   const sampleBlockSize = 1152;
   const chunks: Uint8Array[] = [];
 

@@ -503,7 +503,7 @@ const App: React.FC = () => {
 
     try {
       const ttsPayload = await generateTtsAudio(targetPart.content, targetPart.voiceName);
-      const audioBase64 = pcmBase64ToMp3Base64(
+      const audioBase64 = await pcmBase64ToMp3Base64(
         ttsPayload.pcmBase64,
         ttsPayload.sampleRate,
         ttsPayload.channels
