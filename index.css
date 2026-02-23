@@ -113,6 +113,11 @@ button {
   flex-wrap: wrap;
 }
 
+.mobile-topbar-toggle,
+.mobile-topbar-backdrop {
+  display: none;
+}
+
 .main-layout {
   margin-top: 20px;
   display: grid;
@@ -622,6 +627,55 @@ button {
   .app-shell {
     width: calc(100vw - 18px);
     margin: 10px auto 22px;
+  }
+
+  .mobile-topbar-toggle {
+    display: inline-flex;
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 190;
+    border-radius: 10px;
+    padding: 8px 11px;
+    gap: 6px;
+    font-weight: 700;
+    background: rgba(15, 37, 55, 0.92);
+    color: #ecf5ff;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    box-shadow: 0 10px 20px rgba(4, 13, 20, 0.45);
+    backdrop-filter: blur(10px);
+  }
+
+  .mobile-topbar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 170;
+    background: rgba(4, 12, 18, 0.42);
+  }
+
+  .topbar {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    left: auto;
+    width: min(88vw, 360px);
+    max-height: calc(100vh - 20px);
+    overflow-y: auto;
+    transform: translateX(calc(100% + 20px));
+    transition: transform 0.22s ease;
+    z-index: 180;
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .topbar.open {
+    transform: translateX(0);
+  }
+
+  .topbar-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .section-header {

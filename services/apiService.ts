@@ -28,16 +28,25 @@ export interface TtsAudioPayload {
 
 export async function generateTtsAudio(
   text: string,
-  voiceName: VoiceName
+  voiceName: VoiceName,
+  signal?: AbortSignal
 ): Promise<TtsAudioPayload> {
-  const response = await fetch('/api/tts', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, voiceName }),
-  });
+  try {
+    const response = await fetch('/api/tts', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voiceName }),
+      signal,
+    });
 
-  return parseResponse<TtsAudioPayload>(response);
+    return parseResponse<TtsAudioPayload>(response);
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Narration request was canceled.');
+    }
+    throw error;
+  }
 }
 
 export async function analyzeChapter(chapterTitle: string, fullText: string): Promise<ChapterInsights> {

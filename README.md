@@ -12,6 +12,7 @@ Lumina Studio is a mobile-first audiobook creation app.
 - Analyze chapters with Gemini summary + questions
 - Upload generated MP3 files to Google Drive and stream them back
 - Persist shared library in Supabase (same data for all visitors)
+- PWA-ready on mobile (manifest + service worker + home screen install support)
 
 ## Tech Stack
 
@@ -81,6 +82,23 @@ In Google Cloud console, set OAuth client URLs to your deployed domain:
 
 - Authorized JavaScript origin: `https://your-domain`
 - Authorized redirect URI: `https://your-domain/auth/callback`
+
+## PWA Install (Mobile)
+
+Requirements:
+
+- Deploy over `https://` (required by browsers for service worker).
+- Open the site once after deploy to register service worker.
+
+Android (Chrome):
+
+- Open app URL.
+- Tap browser menu -> `Add to Home screen` (or `Install app` prompt if shown).
+
+iPhone/iPad (Safari):
+
+- Open app URL in Safari.
+- Tap Share icon -> `Add to Home Screen`.
 
 ## Local Run
 

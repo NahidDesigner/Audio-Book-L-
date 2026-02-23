@@ -118,6 +118,7 @@ where dst.device_id = 'public-library'
 3. Open app in Browser B/incognito.
 4. Confirm same library appears.
 5. Play audio and confirm Drive streaming works.
+6. On mobile, verify browser shows `Add to Home Screen` / `Install app`.
 
 ## 7) Common Issues
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   BookPlus,
@@ -10,6 +10,7 @@ import {
   Loader2,
   LogIn,
   LogOut,
+  Menu,
   PencilLine,
   Play,
   Plus,
@@ -18,6 +19,7 @@ import {
   Sparkles,
   Trash2,
   Wand2,
+  X,
 } from 'lucide-react';
 import AudioPlayer from './components/AudioPlayer';
 import BookCard from './components/BookCard';
@@ -57,6 +59,8 @@ type PartModalState =
   | { mode: 'add' }
   | { mode: 'edit'; id: string };
 
+const GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
+
 const App: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -74,6 +78,7 @@ const App: React.FC = () => {
   const [adminAuthError, setAdminAuthError] = useState('');
   const [isAdminAuthBusy, setIsAdminAuthBusy] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
+  const [isMobileTopbarOpen, setIsMobileTopbarOpen] = useState(false);
 
   const [isDriveConnected, setIsDriveConnected] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
@@ -94,6 +99,8 @@ const App: React.FC = () => {
     content: '',
     voiceName: VOICES[4] as VoiceName,
   });
+  const generationControllersRef = useRef<Record<string, AbortController>>({});
+  const generationRunIdsRef = useRef<Record<string, string>>({});
 
   const selectedBook = useMemo(
     () => books.find((book) => book.id === selectedBookId) ?? null,
@@ -180,37 +187,114 @@ const App: React.FC = () => {
     return () => window.removeEventListener('message', listener);
   }, []);
 
-  const updateSelectedPart = (partId: string, patch: Partial<Part>) => {
-    if (!selectedBookId || !selectedChapterId) {
+  useEffect(() => {
+    if (!isMobileTopbarOpen) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsMobileTopbarOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isMobileTopbarOpen]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(generationControllersRef.current).forEach((controller) => controller.abort());
+      generationControllersRef.current = {};
+      generationRunIdsRef.current = {};
+    };
+  }, []);
+
+  const updatePartByLocation = useCallback(
+    (bookId: string, chapterId: string, partId: string, patch: Partial<Part>) => {
+      setBooks((prevBooks) =>
+        prevBooks.map((book) => {
+          if (book.id !== bookId) {
+            return book;
+          }
+          return {
+            ...book,
+            chapters: book.chapters.map((chapter) => {
+              if (chapter.id !== chapterId) {
+                return chapter;
+              }
+              return {
+                ...chapter,
+                parts: chapter.parts.map((part) =>
+                  part.id === partId
+                    ? {
+                        ...part,
+                        ...patch,
+                      }
+                    : part
+                ),
+              };
+            }),
+          };
+        })
+      );
+    },
+    []
+  );
+
+  const clearGenerationRefs = (partId: string) => {
+    delete generationControllersRef.current[partId];
+    delete generationRunIdsRef.current[partId];
+  };
+
+  const cancelPartGeneration = (
+    partId: string,
+    location?: { bookId: string; chapterId: string },
+    message = 'Generation canceled. You can re-generate this part.'
+  ) => {
+    const activeController = generationControllersRef.current[partId];
+    if (activeController) {
+      activeController.abort();
+    }
+    clearGenerationRefs(partId);
+
+    if (location) {
+      updatePartByLocation(location.bookId, location.chapterId, partId, {
+        isGenerating: false,
+        progress: 0,
+        error: message,
+      });
       return;
     }
 
     setBooks((prevBooks) =>
-      prevBooks.map((book) => {
-        if (book.id !== selectedBookId) {
-          return book;
-        }
-        return {
-          ...book,
-          chapters: book.chapters.map((chapter) => {
-            if (chapter.id !== selectedChapterId) {
-              return chapter;
-            }
-            return {
-              ...chapter,
-              parts: chapter.parts.map((part) =>
-                part.id === partId
-                  ? {
-                      ...part,
-                      ...patch,
-                    }
-                  : part
-              ),
-            };
-          }),
-        };
-      })
+      prevBooks.map((book) => ({
+        ...book,
+        chapters: book.chapters.map((chapter) => ({
+          ...chapter,
+          parts: chapter.parts.map((part) =>
+            part.id === partId
+              ? {
+                  ...part,
+                  isGenerating: false,
+                  progress: 0,
+                  error: message,
+                }
+              : part
+          ),
+        })),
+      }))
     );
+  };
+
+  const cancelGenerationsForPartIds = (partIds: string[]) => {
+    partIds.forEach((partId) => {
+      const activeController = generationControllersRef.current[partId];
+      if (activeController) {
+        activeController.abort();
+      }
+      clearGenerationRefs(partId);
+    });
   };
 
   const openAddBook = () => {
@@ -467,6 +551,12 @@ const App: React.FC = () => {
     }
 
     if (deleteTarget.type === 'book') {
+      const targetBook = books.find((book) => book.id === deleteTarget.id);
+      if (targetBook) {
+        cancelGenerationsForPartIds(
+          targetBook.chapters.flatMap((chapter) => chapter.parts.map((part) => part.id))
+        );
+      }
       setBooks((prevBooks) => prevBooks.filter((book) => book.id !== deleteTarget.id));
       if (selectedBookId === deleteTarget.id) {
         setSelectedBookId(null);
@@ -476,6 +566,10 @@ const App: React.FC = () => {
     }
 
     if (deleteTarget.type === 'chapter' && selectedBookId) {
+      const targetChapter = selectedBook?.chapters.find((chapter) => chapter.id === deleteTarget.id);
+      if (targetChapter) {
+        cancelGenerationsForPartIds(targetChapter.parts.map((part) => part.id));
+      }
       setBooks((prevBooks) =>
         prevBooks.map((book) =>
           book.id === selectedBookId
@@ -493,6 +587,10 @@ const App: React.FC = () => {
     }
 
     if (deleteTarget.type === 'part' && selectedBookId && selectedChapterId) {
+      cancelPartGeneration(deleteTarget.id, {
+        bookId: selectedBookId,
+        chapterId: selectedChapterId,
+      });
       setBooks((prevBooks) =>
         prevBooks.map((book) =>
           book.id === selectedBookId
@@ -629,7 +727,19 @@ const App: React.FC = () => {
       return;
     }
 
-    updateSelectedPart(partId, {
+    const bookId = selectedBook.id;
+    const chapterId = selectedChapter.id;
+    const runId = makeId('gen');
+    const abortController = new AbortController();
+    let timedOut = false;
+
+    if (generationControllersRef.current[partId]) {
+      generationControllersRef.current[partId].abort();
+    }
+    generationControllersRef.current[partId] = abortController;
+    generationRunIdsRef.current[partId] = runId;
+
+    updatePartByLocation(bookId, chapterId, partId, {
       isGenerating: true,
       progress: 2,
       error: undefined,
@@ -637,26 +747,50 @@ const App: React.FC = () => {
 
     let progress = 2;
     const timer = window.setInterval(() => {
+      if (generationRunIdsRef.current[partId] !== runId) {
+        window.clearInterval(timer);
+        return;
+      }
       progress = Math.min(progress + 7, 92);
-      updateSelectedPart(partId, { progress });
+      updatePartByLocation(bookId, chapterId, partId, { progress });
     }, 450);
+    const hardTimeout = window.setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+    }, GENERATION_TIMEOUT_MS);
 
     try {
-      const ttsPayload = await generateTtsAudio(targetPart.content, targetPart.voiceName);
+      const ttsPayload = await generateTtsAudio(
+        targetPart.content,
+        targetPart.voiceName,
+        abortController.signal
+      );
+      if (generationRunIdsRef.current[partId] !== runId) {
+        return;
+      }
+
       const audioBase64 = await pcmBase64ToMp3Base64(
         ttsPayload.pcmBase64,
         ttsPayload.sampleRate,
         ttsPayload.channels
       );
+      if (generationRunIdsRef.current[partId] !== runId) {
+        return;
+      }
 
       if (isDriveConnected) {
-        updateSelectedPart(partId, { progress: 96 });
-        const filename = safeFileName(
-          `${selectedBook.title}-${selectedChapter.title}-${targetPart.title}.mp3`
-        );
-        const fileId = await uploadAudioToDrive(audioBase64, filename || `lumina-${partId}.mp3`);
+        updatePartByLocation(bookId, chapterId, partId, { progress: 96 });
+        const baseName =
+          safeFileName(`${selectedBook.title}-${selectedChapter.title}-${targetPart.title}`) ||
+          `lumina-${partId}`;
+        const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const filename = `${baseName}-${uniqueSuffix}.mp3`;
+        const fileId = await uploadAudioToDrive(audioBase64, filename);
+        if (generationRunIdsRef.current[partId] !== runId) {
+          return;
+        }
 
-        updateSelectedPart(partId, {
+        updatePartByLocation(bookId, chapterId, partId, {
           isGenerating: false,
           progress: 100,
           audioBase64,
@@ -664,7 +798,7 @@ const App: React.FC = () => {
           error: undefined,
         });
       } else {
-        updateSelectedPart(partId, {
+        updatePartByLocation(bookId, chapterId, partId, {
           isGenerating: false,
           progress: 100,
           audioBase64,
@@ -673,13 +807,27 @@ const App: React.FC = () => {
         });
       }
     } catch (error: any) {
-      updateSelectedPart(partId, {
+      if (generationRunIdsRef.current[partId] !== runId) {
+        return;
+      }
+
+      const message = abortController.signal.aborted
+        ? timedOut
+          ? 'Generation timed out. Click re-generate.'
+          : 'Generation canceled. Click re-generate.'
+        : error?.message || 'Narration generation failed.';
+
+      updatePartByLocation(bookId, chapterId, partId, {
         isGenerating: false,
         progress: 0,
-        error: error?.message || 'Narration generation failed.',
+        error: message,
       });
     } finally {
       window.clearInterval(timer);
+      window.clearTimeout(hardTimeout);
+      if (generationRunIdsRef.current[partId] === runId) {
+        clearGenerationRefs(partId);
+      }
     }
   };
 
@@ -806,7 +954,27 @@ const App: React.FC = () => {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
+      <button
+        type="button"
+        className="mobile-topbar-toggle"
+        onClick={() => setIsMobileTopbarOpen((prev) => !prev)}
+        aria-expanded={isMobileTopbarOpen}
+        aria-controls="lumina-topbar"
+      >
+        {isMobileTopbarOpen ? <X size={16} /> : <Menu size={16} />}
+        {isMobileTopbarOpen ? 'Close' : 'Menu'}
+      </button>
+
+      {isMobileTopbarOpen && (
+        <button
+          type="button"
+          className="mobile-topbar-backdrop"
+          onClick={() => setIsMobileTopbarOpen(false)}
+          aria-label="Close menu"
+        />
+      )}
+
+      <header id="lumina-topbar" className={isMobileTopbarOpen ? 'topbar open' : 'topbar'}>
         <div className="brand">
           <span className="brand-mark">L</span>
           <div>
@@ -1059,9 +1227,13 @@ const App: React.FC = () => {
 
                       <p className="part-preview">{part.content.slice(0, 220)}{part.content.length > 220 ? '...' : ''}</p>
 
-                      {!hasAudio && !part.isGenerating && isAdmin && (
-                        <button className="primary-btn" onClick={() => generatePartAudio(part.id)}>
-                          <Wand2 size={15} /> Generate narration
+                      {!part.isGenerating && isAdmin && (
+                        <button
+                          className={hasAudio ? 'soft-btn' : 'primary-btn'}
+                          onClick={() => generatePartAudio(part.id)}
+                        >
+                          {hasAudio ? <RefreshCcw size={15} /> : <Wand2 size={15} />}
+                          {hasAudio ? 'Re-generate narration' : 'Generate narration'}
                         </button>
                       )}
 
@@ -1075,6 +1247,14 @@ const App: React.FC = () => {
                             <span style={{ width: `${part.progress}%` }} />
                           </div>
                           <p>Generating audio... {Math.round(part.progress)}%</p>
+                          {isAdmin && (
+                            <button
+                              className="danger-btn"
+                              onClick={() => cancelPartGeneration(part.id)}
+                            >
+                              Cancel generation
+                            </button>
+                          )}
                         </div>
                       )}
 
