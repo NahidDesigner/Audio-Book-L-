@@ -7,9 +7,12 @@ import {
   Cloud,
   CloudOff,
   Loader2,
+  LogIn,
+  LogOut,
   PencilLine,
   Play,
   Plus,
+  Shield,
   Sparkles,
   Trash2,
   Wand2,
@@ -18,10 +21,13 @@ import AudioPlayer from './components/AudioPlayer';
 import BookCard from './components/BookCard';
 import {
   analyzeChapter,
+  fetchAdminStatus,
   disconnectDrive,
   fetchDriveAuthUrl,
   fetchDriveStatus,
   generateTtsAudio,
+  loginAsAdmin,
+  logoutAdmin,
   uploadAudioToDrive,
 } from './services/apiService';
 import { loadBooks, saveBooks } from './services/storageService';
@@ -70,6 +76,14 @@ const App: React.FC = () => {
   const [activePartId, setActivePartId] = useState<string | null>(null);
   const [autoplayEnabled, setAutoplayEnabled] = useState(true);
 
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isCheckingAdmin, setIsCheckingAdmin] = useState(true);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminEmail, setAdminEmail] = useState('nahidwebdesigner@gmail.com');
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminAuthError, setAdminAuthError] = useState('');
+  const [isAdminAuthBusy, setIsAdminAuthBusy] = useState(false);
+
   const [isDriveConnected, setIsDriveConnected] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
 
@@ -100,6 +114,11 @@ const App: React.FC = () => {
     [selectedBook, selectedChapterId]
   );
 
+  const canPlayPart = useCallback(
+    (part: Part) => Boolean(part.audioBase64 || (isAdmin && isDriveConnected && part.driveFileId)),
+    [isAdmin, isDriveConnected]
+  );
+
   useEffect(() => {
     const initialize = async () => {
       try {
@@ -114,6 +133,22 @@ const App: React.FC = () => {
     };
 
     initialize();
+  }, []);
+
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      try {
+        const status = await fetchAdminStatus();
+        setIsAdmin(status);
+      } catch (error) {
+        console.error('Failed to fetch admin status:', error);
+        setIsAdmin(false);
+      } finally {
+        setIsCheckingAdmin(false);
+      }
+    };
+
+    checkAdminStatus();
   }, []);
 
   useEffect(() => {
@@ -184,11 +219,17 @@ const App: React.FC = () => {
   };
 
   const openAddBook = () => {
+    if (!isAdmin) {
+      return;
+    }
     setBookDraft({ title: '', author: '', description: '', coverUrl: '' });
     setBookModal({ mode: 'add' });
   };
 
   const openEditBook = (bookId: string) => {
+    if (!isAdmin) {
+      return;
+    }
     const target = books.find((book) => book.id === bookId);
     if (!target) {
       return;
@@ -204,6 +245,9 @@ const App: React.FC = () => {
 
   const submitBook = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!isAdmin) {
+      return;
+    }
 
     if (bookModal.mode === 'add') {
       const newBook: Book = {
@@ -240,11 +284,17 @@ const App: React.FC = () => {
   };
 
   const openAddChapter = () => {
+    if (!isAdmin) {
+      return;
+    }
     setChapterDraft({ title: '' });
     setChapterModal({ mode: 'add' });
   };
 
   const openEditChapter = (chapterId: string) => {
+    if (!isAdmin) {
+      return;
+    }
     const target = selectedBook?.chapters.find((chapter) => chapter.id === chapterId);
     if (!target) {
       return;
@@ -255,6 +305,9 @@ const App: React.FC = () => {
 
   const submitChapter = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!isAdmin) {
+      return;
+    }
     if (!selectedBookId) {
       return;
     }
@@ -302,11 +355,17 @@ const App: React.FC = () => {
   };
 
   const openAddPart = () => {
+    if (!isAdmin) {
+      return;
+    }
     setPartDraft({ title: '', content: '', voiceName: VOICES[4] });
     setPartModal({ mode: 'add' });
   };
 
   const openEditPart = (partId: string) => {
+    if (!isAdmin) {
+      return;
+    }
     const target = selectedChapter?.parts.find((part) => part.id === partId);
     if (!target) {
       return;
@@ -322,6 +381,9 @@ const App: React.FC = () => {
 
   const submitPart = (event: React.FormEvent) => {
     event.preventDefault();
+    if (!isAdmin) {
+      return;
+    }
     if (!selectedBookId || !selectedChapterId) {
       return;
     }
@@ -401,6 +463,10 @@ const App: React.FC = () => {
   };
 
   const confirmDelete = () => {
+    if (!isAdmin) {
+      return;
+    }
+
     if (!deleteTarget) {
       return;
     }
@@ -457,7 +523,47 @@ const App: React.FC = () => {
     setDeleteTarget(null);
   };
 
+  const handleAdminLoginSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAdminAuthError('');
+    setIsAdminAuthBusy(true);
+
+    try {
+      await loginAsAdmin(adminEmail.trim(), adminPassword);
+      setIsAdmin(true);
+      setShowAdminLogin(false);
+      setAdminPassword('');
+      const connected = await fetchDriveStatus();
+      setIsDriveConnected(connected);
+    } catch (error: any) {
+      setAdminAuthError(error?.message || 'Admin login failed.');
+    } finally {
+      setIsAdminAuthBusy(false);
+    }
+  };
+
+  const handleAdminLogout = async () => {
+    try {
+      await logoutAdmin();
+      setIsAdmin(false);
+      setShowAdminLogin(false);
+      setAdminPassword('');
+      setAdminAuthError('');
+      setDeleteTarget(null);
+      setBookModal({ mode: 'closed' });
+      setChapterModal({ mode: 'closed' });
+      setPartModal({ mode: 'closed' });
+      setIsDriveConnected(false);
+    } catch (error: any) {
+      alert(error?.message || 'Failed to logout admin user.');
+    }
+  };
+
   const connectDrive = async () => {
+    if (!isAdmin) {
+      return;
+    }
+
     try {
       const redirectUri = `${window.location.origin}/auth/callback`;
       const authUrl = await fetchDriveAuthUrl(redirectUri);
@@ -471,6 +577,10 @@ const App: React.FC = () => {
   };
 
   const handleDisconnectDrive = async () => {
+    if (!isAdmin) {
+      return;
+    }
+
     try {
       await disconnectDrive();
       setIsDriveConnected(false);
@@ -480,6 +590,10 @@ const App: React.FC = () => {
   };
 
   const generatePartAudio = async (partId: string) => {
+    if (!isAdmin) {
+      return;
+    }
+
     if (!selectedBook || !selectedChapter) {
       return;
     }
@@ -519,7 +633,7 @@ const App: React.FC = () => {
         updateSelectedPart(partId, {
           isGenerating: false,
           progress: 100,
-          audioBase64: undefined,
+          audioBase64,
           driveFileId: fileId,
           error: undefined,
         });
@@ -544,6 +658,10 @@ const App: React.FC = () => {
   };
 
   const analyzeSelectedChapter = async () => {
+    if (!isAdmin) {
+      return;
+    }
+
     if (!selectedBookId || !selectedChapterId || !selectedChapter) {
       return;
     }
@@ -621,7 +739,7 @@ const App: React.FC = () => {
       return;
     }
 
-    const firstPlayable = selectedChapter.parts.find((part) => part.audioBase64 || part.driveFileId);
+    const firstPlayable = selectedChapter.parts.find((part) => canPlayPart(part));
     if (!firstPlayable) {
       alert('Generate at least one narrated part first.');
       return;
@@ -642,16 +760,16 @@ const App: React.FC = () => {
 
     for (let i = currentIndex + 1; i < selectedChapter.parts.length; i += 1) {
       const candidate = selectedChapter.parts[i];
-      if (candidate.audioBase64 || candidate.driveFileId) {
+      if (canPlayPart(candidate)) {
         setActivePartId(candidate.id);
         return;
       }
     }
 
     setActivePartId(null);
-  }, [autoplayEnabled, selectedChapter, activePartId]);
+  }, [autoplayEnabled, canPlayPart, selectedChapter, activePartId]);
 
-  if (!loaded) {
+  if (!loaded || isCheckingAdmin) {
     return (
       <div className="app-loading">
         <Loader2 className="spin" size={42} />
@@ -677,13 +795,31 @@ const App: React.FC = () => {
             Autoplay {autoplayEnabled ? 'On' : 'Off'}
           </button>
 
-          <button
-            className={isDriveConnected ? 'soft-btn connected' : 'soft-btn'}
-            onClick={isDriveConnected ? handleDisconnectDrive : connectDrive}
-          >
-            {isDriveConnected ? <Cloud size={15} /> : <CloudOff size={15} />}
-            Drive {isDriveConnected ? 'Connected' : 'Connect'}
-          </button>
+          {isAdmin && (
+            <button
+              className={isDriveConnected ? 'soft-btn connected' : 'soft-btn'}
+              onClick={isDriveConnected ? handleDisconnectDrive : connectDrive}
+            >
+              {isDriveConnected ? <Cloud size={15} /> : <CloudOff size={15} />}
+              Drive {isDriveConnected ? 'Connected' : 'Connect'}
+            </button>
+          )}
+
+          {isAdmin ? (
+            <button className="soft-btn connected" onClick={handleAdminLogout}>
+              <LogOut size={15} /> Admin Logout
+            </button>
+          ) : (
+            <button
+              className="soft-btn"
+              onClick={() => {
+                setAdminAuthError('');
+                setShowAdminLogin(true);
+              }}
+            >
+              <LogIn size={15} /> Admin Login
+            </button>
+          )}
         </div>
       </header>
 
@@ -693,11 +829,13 @@ const App: React.FC = () => {
             <div className="section-header">
               <div>
                 <h2>Your Library</h2>
-                <p>Create books, split chapters into parts, and narrate them with Gemini voices.</p>
+                <p>Browse and listen publicly. Admin can create, edit, and generate narration.</p>
               </div>
-              <button className="primary-btn" onClick={openAddBook}>
-                <BookPlus size={17} /> New Book
-              </button>
+              {isAdmin && (
+                <button className="primary-btn" onClick={openAddBook}>
+                  <BookPlus size={17} /> New Book
+                </button>
+              )}
             </div>
 
             {books.length === 0 ? (
@@ -709,6 +847,7 @@ const App: React.FC = () => {
                     key={book.id}
                     book={book}
                     onOpen={(bookId) => setSelectedBookId(bookId)}
+                    canManage={isAdmin}
                     onEdit={openEditBook}
                     onDelete={(bookId) => setDeleteTarget({ type: 'book', id: bookId })}
                   />
@@ -737,20 +876,22 @@ const App: React.FC = () => {
                 <h2>{selectedBook.title}</h2>
                 <p>{selectedBook.author}</p>
                 <p>{selectedBook.description}</p>
-                <div className="chapter-controls">
-                  <button className="primary-btn" onClick={openAddChapter}>
-                    <Plus size={16} /> Add Chapter
-                  </button>
-                  <button className="soft-btn" onClick={() => openEditBook(selectedBook.id)}>
-                    <PencilLine size={15} /> Edit Book
-                  </button>
-                  <button
-                    className="danger-btn"
-                    onClick={() => setDeleteTarget({ type: 'book', id: selectedBook.id })}
-                  >
-                    <Trash2 size={15} /> Delete
-                  </button>
-                </div>
+                {isAdmin && (
+                  <div className="chapter-controls">
+                    <button className="primary-btn" onClick={openAddChapter}>
+                      <Plus size={16} /> Add Chapter
+                    </button>
+                    <button className="soft-btn" onClick={() => openEditBook(selectedBook.id)}>
+                      <PencilLine size={15} /> Edit Book
+                    </button>
+                    <button
+                      className="danger-btn"
+                      onClick={() => setDeleteTarget({ type: 'book', id: selectedBook.id })}
+                    >
+                      <Trash2 size={15} /> Delete
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -772,17 +913,19 @@ const App: React.FC = () => {
                     <p>{chapter.parts.length} parts</p>
                   </button>
 
-                  <div className="chapter-card-actions">
-                    <button className="soft-btn" onClick={() => openEditChapter(chapter.id)}>
-                      <PencilLine size={15} />
-                    </button>
-                    <button
-                      className="danger-btn"
-                      onClick={() => setDeleteTarget({ type: 'chapter', id: chapter.id })}
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
+                  {isAdmin && (
+                    <div className="chapter-card-actions">
+                      <button className="soft-btn" onClick={() => openEditChapter(chapter.id)}>
+                        <PencilLine size={15} />
+                      </button>
+                      <button
+                        className="danger-btn"
+                        onClick={() => setDeleteTarget({ type: 'chapter', id: chapter.id })}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  )}
                 </article>
               ))}
             </div>
@@ -804,27 +947,31 @@ const App: React.FC = () => {
             <div className="section-header">
               <div>
                 <h2>{selectedChapter.title}</h2>
-                <p>
-                  {selectedChapter.parts.length} parts •{' '}
-                  {selectedChapter.parts.filter((part) => part.audioBase64 || part.driveFileId).length}{' '}
-                  narrated
-                </p>
-              </div>
+                  <p>
+                    {selectedChapter.parts.length} parts •{' '}
+                  {selectedChapter.parts.filter((part) => canPlayPart(part)).length}{' '}
+                    narrated
+                  </p>
+                </div>
               <div className="section-actions-wrap">
                 <button className="soft-btn" onClick={handlePlayChapter}>
                   <Play size={15} /> Play chapter
                 </button>
-                <button
-                  className="soft-btn"
-                  onClick={analyzeSelectedChapter}
-                  disabled={selectedChapter.isAnalyzing || selectedChapter.parts.length === 0}
-                >
-                  {selectedChapter.isAnalyzing ? <Loader2 className="spin" size={15} /> : <Brain size={15} />}
-                  Insights
-                </button>
-                <button className="primary-btn" onClick={openAddPart}>
-                  <Plus size={15} /> Add Part
-                </button>
+                {isAdmin && (
+                  <button
+                    className="soft-btn"
+                    onClick={analyzeSelectedChapter}
+                    disabled={selectedChapter.isAnalyzing || selectedChapter.parts.length === 0}
+                  >
+                    {selectedChapter.isAnalyzing ? <Loader2 className="spin" size={15} /> : <Brain size={15} />}
+                    Insights
+                  </button>
+                )}
+                {isAdmin && (
+                  <button className="primary-btn" onClick={openAddPart}>
+                    <Plus size={15} /> Add Part
+                  </button>
+                )}
               </div>
             </div>
 
@@ -836,7 +983,7 @@ const App: React.FC = () => {
 
                 {selectedChapter.parts.map((part, index) => {
                   const isActive = part.id === activePartId;
-                  const hasAudio = Boolean(part.audioBase64 || part.driveFileId);
+                  const hasAudio = canPlayPart(part);
 
                   return (
                     <article key={part.id} className={isActive ? 'part-card active' : 'part-card'}>
@@ -850,25 +997,31 @@ const App: React.FC = () => {
                           </p>
                         </div>
 
-                        <div className="part-actions">
-                          <button className="soft-btn" onClick={() => openEditPart(part.id)}>
-                            <PencilLine size={14} />
-                          </button>
-                          <button
-                            className="danger-btn"
-                            onClick={() => setDeleteTarget({ type: 'part', id: part.id })}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
+                        {isAdmin && (
+                          <div className="part-actions">
+                            <button className="soft-btn" onClick={() => openEditPart(part.id)}>
+                              <PencilLine size={14} />
+                            </button>
+                            <button
+                              className="danger-btn"
+                              onClick={() => setDeleteTarget({ type: 'part', id: part.id })}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
                       </div>
 
                       <p className="part-preview">{part.content.slice(0, 220)}{part.content.length > 220 ? '...' : ''}</p>
 
-                      {!hasAudio && !part.isGenerating && (
+                      {!hasAudio && !part.isGenerating && isAdmin && (
                         <button className="primary-btn" onClick={() => generatePartAudio(part.id)}>
                           <Wand2 size={15} /> Generate narration
                         </button>
+                      )}
+
+                      {!hasAudio && !part.isGenerating && !isAdmin && (
+                        <p className="muted-row">Narration for this part is not published yet.</p>
                       )}
 
                       {part.isGenerating && (
@@ -891,7 +1044,7 @@ const App: React.FC = () => {
                       {hasAudio && isActive && (
                         <AudioPlayer
                           audioBase64={part.audioBase64}
-                          driveFileId={part.driveFileId}
+                          driveFileId={isDriveConnected ? part.driveFileId : undefined}
                           autoPlay
                           onEnded={handlePartFinished}
                         />
@@ -941,7 +1094,7 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {deleteTarget && (
+      {isAdmin && deleteTarget && (
         <div className="modal-backdrop">
           <div className="modal-card compact">
             <h3>Confirm deletion</h3>
@@ -958,7 +1111,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {bookModal.mode !== 'closed' && (
+      {isAdmin && bookModal.mode !== 'closed' && (
         <div className="modal-backdrop">
           <div className="modal-card">
             <h3>{bookModal.mode === 'add' ? 'Create Book' : 'Edit Book'}</h3>
@@ -1001,7 +1154,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {chapterModal.mode !== 'closed' && (
+      {isAdmin && chapterModal.mode !== 'closed' && (
         <div className="modal-backdrop">
           <div className="modal-card compact">
             <h3>{chapterModal.mode === 'add' ? 'Add Chapter' : 'Edit Chapter'}</h3>
@@ -1030,7 +1183,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {partModal.mode !== 'closed' && (
+      {isAdmin && partModal.mode !== 'closed' && (
         <div className="modal-backdrop">
           <div className="modal-card large">
             <h3>{partModal.mode === 'add' ? 'Add Part' : 'Edit Part'}</h3>
@@ -1070,6 +1223,49 @@ const App: React.FC = () => {
                 </button>
                 <button type="submit" className="primary-btn">
                   Save Part
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {!isAdmin && showAdminLogin && (
+        <div className="modal-backdrop">
+          <div className="modal-card compact">
+            <h3><Shield size={16} /> Admin Login</h3>
+            <form className="modal-form" onSubmit={handleAdminLoginSubmit}>
+              <input
+                required
+                type="email"
+                placeholder="Admin email"
+                value={adminEmail}
+                onChange={(event) => setAdminEmail(event.target.value)}
+              />
+              <input
+                required
+                type="password"
+                placeholder="Password"
+                value={adminPassword}
+                onChange={(event) => setAdminPassword(event.target.value)}
+              />
+              {adminAuthError && <p className="error-text">{adminAuthError}</p>}
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="soft-btn"
+                  onClick={() => {
+                    setShowAdminLogin(false);
+                    setAdminPassword('');
+                    setAdminAuthError('');
+                  }}
+                  disabled={isAdminAuthBusy}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="primary-btn" disabled={isAdminAuthBusy}>
+                  {isAdminAuthBusy ? <Loader2 size={15} className="spin" /> : <LogIn size={15} />}
+                  Login
                 </button>
               </div>
             </form>

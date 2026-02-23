@@ -20,6 +20,11 @@ const __dirname = path.dirname(__filename);
 const OAUTH_STATE_COOKIE = 'lumina_oauth_state';
 const DRIVE_TOKEN_COOKIE = 'lumina_drive_tokens';
 const DRIVE_FOLDER_NAME = 'Lumina Audiobooks';
+const ADMIN_SESSION_COOKIE = 'lumina_admin_session';
+const ADMIN_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'nahidwebdesigner@gmail.com';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'nahidnhd';
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || 'change-admin-session-secret';
 
 app.use(express.json({ limit: '20mb' }));
 app.use(cookieParser());
@@ -46,6 +51,11 @@ interface UploadRequestBody {
   mimeType?: string;
 }
 
+interface AdminLoginBody {
+  email: string;
+  password: string;
+}
+
 function jsonError(res: express.Response, status: number, message: string) {
   res.status(status).json({ error: message });
 }
@@ -68,6 +78,74 @@ function getCookieOptions(req: express.Request) {
     sameSite: 'lax' as const,
     path: '/',
   };
+}
+
+function safeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function signAdminPayload(payloadBase64: string): string {
+  return crypto.createHmac('sha256', ADMIN_SESSION_SECRET).update(payloadBase64).digest('base64url');
+}
+
+function createAdminSessionToken(email: string): string {
+  const payload = {
+    email,
+    exp: Date.now() + ADMIN_SESSION_TTL_MS,
+  };
+  const payloadBase64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const signature = signAdminPayload(payloadBase64);
+  return `${payloadBase64}.${signature}`;
+}
+
+function verifyAdminSessionToken(token: string): { email: string; exp: number } | null {
+  const [payloadBase64, signature] = token.split('.');
+  if (!payloadBase64 || !signature) {
+    return null;
+  }
+
+  const expectedSignature = signAdminPayload(payloadBase64);
+  if (!safeEqual(signature, expectedSignature)) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(payloadBase64, 'base64url').toString('utf8')) as {
+      email?: string;
+      exp?: number;
+    };
+
+    if (!payload.email || typeof payload.exp !== 'number') {
+      return null;
+    }
+    if (payload.exp < Date.now()) {
+      return null;
+    }
+    return { email: payload.email, exp: payload.exp };
+  } catch {
+    return null;
+  }
+}
+
+function isAdminAuthenticated(req: express.Request): boolean {
+  const token = req.cookies[ADMIN_SESSION_COOKIE];
+  if (!token || typeof token !== 'string') {
+    return false;
+  }
+  const payload = verifyAdminSessionToken(token);
+  return Boolean(payload && payload.email === ADMIN_EMAIL);
+}
+
+function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!isAdminAuthenticated(req)) {
+    return jsonError(res, 401, 'Admin authentication required.');
+  }
+  next();
 }
 
 function getGeminiClient(): GoogleGenAI {
@@ -132,7 +210,35 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/tts', async (req, res) => {
+app.get('/api/admin/status', (req, res) => {
+  res.json({ isAdmin: isAdminAuthenticated(req) });
+});
+
+app.post('/api/admin/login', (req, res) => {
+  const { email, password } = req.body as AdminLoginBody;
+
+  if (!email || !password) {
+    return jsonError(res, 400, 'email and password are required.');
+  }
+
+  if (!safeEqual(email.trim().toLowerCase(), ADMIN_EMAIL.toLowerCase()) || !safeEqual(password, ADMIN_PASSWORD)) {
+    return jsonError(res, 401, 'Invalid admin credentials.');
+  }
+
+  const token = createAdminSessionToken(ADMIN_EMAIL);
+  res.cookie(ADMIN_SESSION_COOKIE, token, {
+    ...getCookieOptions(req),
+    maxAge: ADMIN_SESSION_TTL_MS,
+  });
+  res.json({ success: true });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  res.clearCookie(ADMIN_SESSION_COOKIE, getCookieOptions(req));
+  res.json({ success: true });
+});
+
+app.post('/api/tts', requireAdmin, async (req, res) => {
   try {
     const { text, voiceName } = req.body as TtsRequestBody;
 
@@ -191,7 +297,7 @@ app.post('/api/tts', async (req, res) => {
   }
 });
 
-app.post('/api/analyze', async (req, res) => {
+app.post('/api/analyze', requireAdmin, async (req, res) => {
   try {
     const { chapterTitle, fullText } = req.body as AnalyzeRequestBody;
 
@@ -227,7 +333,7 @@ app.post('/api/analyze', async (req, res) => {
   }
 });
 
-app.get('/api/auth/url', (req, res) => {
+app.get('/api/auth/url', requireAdmin, (req, res) => {
   try {
     const redirectUriParam = req.query.redirectUri;
     if (typeof redirectUriParam !== 'string') {
@@ -267,6 +373,10 @@ app.get('/api/auth/url', (req, res) => {
 
 app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
   try {
+    if (!isAdminAuthenticated(req)) {
+      return res.status(401).send('Admin authentication required.');
+    }
+
     const stateFromQuery = typeof req.query.state === 'string' ? req.query.state : '';
     const code = typeof req.query.code === 'string' ? req.query.code : '';
 
@@ -311,16 +421,19 @@ app.get(['/auth/callback', '/auth/callback/'], async (req, res) => {
 });
 
 app.get('/api/auth/status', (req, res) => {
+  if (!isAdminAuthenticated(req)) {
+    return res.json({ connected: false });
+  }
   res.json({ connected: Boolean(req.cookies[DRIVE_TOKEN_COOKIE]) });
 });
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', requireAdmin, (req, res) => {
   res.clearCookie(OAUTH_STATE_COOKIE, getCookieOptions(req));
   res.clearCookie(DRIVE_TOKEN_COOKIE, getCookieOptions(req));
   res.json({ success: true });
 });
 
-app.post('/api/drive/upload', async (req, res) => {
+app.post('/api/drive/upload', requireAdmin, async (req, res) => {
   try {
     const { base64Audio, filename, mimeType } = req.body as UploadRequestBody;
 

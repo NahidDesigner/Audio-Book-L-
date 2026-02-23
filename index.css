@@ -306,13 +306,19 @@ button {
 }
 
 .audio-player {
-  display: flex;
-  align-items: center;
+  display: grid;
   gap: 10px;
   background: rgba(11, 24, 36, 0.75);
   border: 1px solid #27445f;
   border-radius: 12px;
   padding: 9px;
+}
+
+.audio-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .audio-track-wrap {
@@ -331,6 +337,27 @@ button {
   justify-content: space-between;
   font-size: 0.72rem;
   color: #c5d8ea;
+}
+
+.rate-select {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: #d9e7f4;
+}
+
+.rate-select select {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ebf4ff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.native-audio {
+  width: 100%;
 }
 
 .progress-wrap p {

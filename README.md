@@ -4,7 +4,9 @@ Lumina Studio is a mobile-first audiobook creation app.
 
 ## Features
 
-- Create books, chapters, and parts
+- Public users can browse library and listen to published narration
+- Admin login protects create/edit/delete/generate actions
+- Create books, chapters, and parts (admin only)
 - Generate narrated MP3 audio from text using Gemini TTS
 - Play parts individually or autoplay chapter queue
 - Analyze chapters with Gemini summary + questions
@@ -33,6 +35,9 @@ Required backend variables:
 - `GEMINI_API_KEY`
 - `CLIENT_ID`
 - `CLIENT_SECRET`
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD`
+- `ADMIN_SESSION_SECRET`
 
 Optional frontend build variables:
 
@@ -101,6 +106,9 @@ In Coolify:
    - `GEMINI_API_KEY`
    - `CLIENT_ID`
    - `CLIENT_SECRET`
+   - `ADMIN_EMAIL`
+   - `ADMIN_PASSWORD`
+   - `ADMIN_SESSION_SECRET`
    - `PORT=3000` (optional; default 3000)
 4. Expose port `3000`.
 

@@ -5,11 +5,12 @@ import { BookOpen, Trash2, PencilLine } from 'lucide-react';
 interface BookCardProps {
   book: Book;
   onOpen: (bookId: string) => void;
-  onEdit: (bookId: string) => void;
-  onDelete: (bookId: string) => void;
+  onEdit?: (bookId: string) => void;
+  onDelete?: (bookId: string) => void;
+  canManage?: boolean;
 }
 
-const BookCard: React.FC<BookCardProps> = ({ book, onOpen, onEdit, onDelete }) => {
+const BookCard: React.FC<BookCardProps> = ({ book, onOpen, onEdit, onDelete, canManage = false }) => {
   const totalParts = book.chapters.reduce((acc, chapter) => acc + chapter.parts.length, 0);
   const narratedParts = book.chapters.reduce(
     (acc, chapter) =>
@@ -39,12 +40,16 @@ const BookCard: React.FC<BookCardProps> = ({ book, onOpen, onEdit, onDelete }) =
           <button className="ghost-btn" onClick={() => onOpen(book.id)}>
             <BookOpen size={15} /> Open
           </button>
-          <button className="ghost-btn" onClick={() => onEdit(book.id)}>
-            <PencilLine size={15} /> Edit
-          </button>
-          <button className="danger-btn" onClick={() => onDelete(book.id)}>
-            <Trash2 size={15} /> Delete
-          </button>
+          {canManage && onEdit && onDelete && (
+            <>
+              <button className="ghost-btn" onClick={() => onEdit(book.id)}>
+                <PencilLine size={15} /> Edit
+              </button>
+              <button className="danger-btn" onClick={() => onDelete(book.id)}>
+                <Trash2 size={15} /> Delete
+              </button>
+            </>
+          )}
         </div>
       </div>
     </article>

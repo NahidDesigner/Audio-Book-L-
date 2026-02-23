@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pause, Play, Square } from 'lucide-react';
+import { Loader2, Pause, Play, RotateCcw, RotateCw, Square } from 'lucide-react';
 import { base64ToBlob, formatTime } from '../utils/audioUtils';
 
 interface AudioPlayerProps {
@@ -17,33 +17,89 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoadingSource, setIsLoadingSource] = useState(false);
+  const [sourceError, setSourceError] = useState('');
+  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
+  const [playbackRate, setPlaybackRate] = useState(1);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
 
   useEffect(() => {
-    const audio = new Audio();
-    audioRef.current = audio;
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    const controller = new AbortController();
 
-    let blobUrl: string | null = null;
-    if (driveFileId) {
-      audio.src = `/api/drive/stream/${driveFileId}`;
-    } else if (audioBase64) {
-      const blob = base64ToBlob(audioBase64, 'audio/mpeg');
-      blobUrl = URL.createObjectURL(blob);
-      audio.src = blobUrl;
+    const resolveSource = async () => {
+      setIsLoadingSource(true);
+      setSourceError('');
+      setSourceUrl(null);
+      setDuration(0);
+      setCurrentTime(0);
+      setIsPlaying(false);
+
+      try {
+        if (audioBase64) {
+          const blob = base64ToBlob(audioBase64, 'audio/mpeg');
+          objectUrl = URL.createObjectURL(blob);
+          if (!cancelled) {
+            setSourceUrl(objectUrl);
+          }
+          return;
+        }
+
+        if (driveFileId) {
+          const response = await fetch(`/api/drive/stream/${driveFileId}`, {
+            credentials: 'include',
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            throw new Error(`Audio stream failed (${response.status})`);
+          }
+          const blob = await response.blob();
+          objectUrl = URL.createObjectURL(blob);
+          if (!cancelled) {
+            setSourceUrl(objectUrl);
+          }
+          return;
+        }
+      } catch (error: any) {
+        if (!cancelled && !controller.signal.aborted) {
+          setSourceError(error?.message || 'Could not load audio source.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingSource(false);
+        }
+      }
+    };
+
+    resolveSource();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [audioBase64, driveFileId]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
     }
 
-    audio.onloadedmetadata = () => {
-      setDuration(audio.duration || 0);
+    const handleLoadedMetadata = () => {
+      setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+      setCurrentTime(Number.isFinite(audio.currentTime) ? audio.currentTime : 0);
     };
-
-    audio.ontimeupdate = () => {
-      setCurrentTime(audio.currentTime || 0);
+    const handleTimeUpdate = () => {
+      setCurrentTime(Number.isFinite(audio.currentTime) ? audio.currentTime : 0);
     };
-
-    audio.onplay = () => setIsPlaying(true);
-    audio.onpause = () => setIsPlaying(false);
-    audio.onended = () => {
+    const handlePlay = () => setIsPlaying(true);
+    const handlePause = () => setIsPlaying(false);
+    const handleEnded = () => {
       setIsPlaying(false);
       setCurrentTime(0);
       if (onEnded) {
@@ -51,20 +107,43 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       }
     };
 
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('play', handlePlay);
+    audio.addEventListener('pause', handlePause);
+    audio.addEventListener('ended', handleEnded);
+
+    return () => {
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('play', handlePlay);
+      audio.removeEventListener('pause', handlePause);
+      audio.removeEventListener('ended', handleEnded);
+    };
+  }, [sourceUrl, onEnded]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !sourceUrl) {
+      return;
+    }
+    audio.playbackRate = playbackRate;
+  }, [playbackRate, sourceUrl]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !sourceUrl) {
+      return;
+    }
+    audio.currentTime = 0;
+    setCurrentTime(0);
+
     if (autoPlay) {
       audio.play().catch(() => {
         setIsPlaying(false);
       });
     }
-
-    return () => {
-      audio.pause();
-      audio.src = '';
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
-      }
-    };
-  }, [audioBase64, driveFileId, autoPlay, onEnded]);
+  }, [autoPlay, sourceUrl]);
 
   const play = () => {
     audioRef.current?.play().catch(() => {
@@ -93,31 +172,87 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     setCurrentTime(nextValue);
   };
 
+  const jumpBy = (delta: number) => {
+    const audio = audioRef.current;
+    if (!audio) {
+      return;
+    }
+    const next = Math.min(Math.max(audio.currentTime + delta, 0), Number.isFinite(duration) ? duration : 0);
+    audio.currentTime = next;
+    setCurrentTime(next);
+  };
+
   return (
     <div className="audio-player">
-      <button className="icon-btn" onClick={isPlaying ? pause : play}>
-        {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-      </button>
+      {isLoadingSource && (
+        <p className="muted-row">
+          <Loader2 className="spin" size={15} /> Loading audio...
+        </p>
+      )}
 
-      <div className="audio-track-wrap">
-        <input
-          className="audio-track"
-          type="range"
-          min={0}
-          max={duration || 0}
-          step={0.1}
-          value={currentTime}
-          onChange={(event) => seek(Number(event.target.value))}
-        />
-        <div className="audio-time">
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(duration)}</span>
-        </div>
-      </div>
+      {sourceError && <p className="error-text">{sourceError}</p>}
 
-      <button className="icon-btn" onClick={stop}>
-        <Square size={18} />
-      </button>
+      {!isLoadingSource && !sourceError && sourceUrl && (
+        <>
+          <div className="audio-controls-row">
+            <button className="icon-btn" onClick={isPlaying ? pause : play}>
+              {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+            </button>
+
+            <button className="icon-btn" onClick={() => jumpBy(-10)} title="Back 10 seconds">
+              <RotateCcw size={16} />
+            </button>
+
+            <button className="icon-btn" onClick={() => jumpBy(10)} title="Forward 10 seconds">
+              <RotateCw size={16} />
+            </button>
+
+            <button className="icon-btn" onClick={stop}>
+              <Square size={18} />
+            </button>
+
+            <label className="rate-select">
+              Speed
+              <select
+                value={playbackRate}
+                onChange={(event) => setPlaybackRate(Number(event.target.value))}
+              >
+                <option value={0.75}>0.75x</option>
+                <option value={1}>1x</option>
+                <option value={1.25}>1.25x</option>
+                <option value={1.5}>1.5x</option>
+                <option value={2}>2x</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="audio-track-wrap">
+            <input
+              className="audio-track"
+              type="range"
+              min={0}
+              max={duration > 0 ? duration : 0}
+              step={0.1}
+              value={currentTime}
+              onChange={(event) => seek(Number(event.target.value))}
+              disabled={duration <= 0}
+            />
+            <div className="audio-time">
+              <span>{formatTime(currentTime)}</span>
+              <span>{formatTime(duration)}</span>
+            </div>
+          </div>
+
+          <audio
+            ref={audioRef}
+            src={sourceUrl}
+            controls
+            playsInline
+            preload="metadata"
+            className="native-audio"
+          />
+        </>
+      )}
     </div>
   );
 };
