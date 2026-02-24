@@ -515,6 +515,18 @@ button {
   font-size: 0.86rem;
 }
 
+.status-text-ok {
+  color: #d8f8f3;
+  background: rgba(95, 208, 197, 0.14);
+  border: 1px solid rgba(95, 208, 197, 0.38);
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 0.86rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

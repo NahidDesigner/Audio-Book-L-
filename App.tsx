@@ -1110,6 +1110,13 @@ const App: React.FC = () => {
           </p>
         )}
 
+        {isAdmin && supabaseStatus !== 'unknown' && (
+          <p className={supabaseStatus === 'error' ? 'error-text' : 'status-text-ok'}>
+            <Shield size={14} />
+            Supabase: {supabaseStatusMessage || (supabaseStatus === 'connected' ? 'Connected' : 'Checking...')}
+          </p>
+        )}
+
         {initialLoadFailed && (
           <p className="error-text">
             Could not load shared library from Supabase.
