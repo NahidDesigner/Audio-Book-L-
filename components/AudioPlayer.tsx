@@ -115,12 +115,17 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         onEnded();
       }
     };
+    const handleError = () => {
+      setIsPlaying(false);
+      setSourceError('Audio is not publicly accessible yet. Ask admin to run Repair Public Audio.');
+    };
 
     audio.addEventListener('loadedmetadata', handleLoadedMetadata);
     audio.addEventListener('timeupdate', handleTimeUpdate);
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
     audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
 
     return () => {
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
@@ -128,6 +133,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
       audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
     };
   }, [sourceUrl, onEnded]);
 

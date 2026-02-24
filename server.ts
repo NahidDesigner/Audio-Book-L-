@@ -2,7 +2,7 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import express from 'express';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
-import { google } from 'googleapis';
+import { google, drive_v3 } from 'googleapis';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
@@ -204,6 +204,58 @@ function getDriveService(req: express.Request) {
   oauth.setCredentials(parsed);
 
   return google.drive({ version: 'v3', auth: oauth });
+}
+
+function getDriveErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+
+  const maybeCode = (error as { code?: unknown }).code;
+  if (typeof maybeCode === 'number') {
+    return maybeCode;
+  }
+
+  const responseStatus = (error as { response?: { status?: unknown } }).response?.status;
+  if (typeof responseStatus === 'number') {
+    return responseStatus;
+  }
+
+  return undefined;
+}
+
+function getDriveErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return String(error || 'Unknown Google Drive error.');
+}
+
+function isPermissionAlreadyExistsError(error: unknown): boolean {
+  const status = getDriveErrorStatus(error);
+  if (status === 409) {
+    return true;
+  }
+
+  const message = getDriveErrorMessage(error);
+  return /already.*permission/i.test(message);
+}
+
+async function ensureDriveFileIsPublic(drive: drive_v3.Drive, fileId: string): Promise<void> {
+  try {
+    await drive.permissions.create({
+      fileId,
+      requestBody: {
+        type: 'anyone',
+        role: 'reader',
+      },
+    });
+  } catch (error) {
+    if (isPermissionAlreadyExistsError(error)) {
+      return;
+    }
+    throw new Error(`Could not publish audio file for public playback: ${getDriveErrorMessage(error)}`);
+  }
 }
 
 app.get('/api/health', (_req, res) => {
@@ -485,18 +537,7 @@ app.post('/api/drive/upload', requireAdmin, async (req, res) => {
       return jsonError(res, 500, 'Drive upload succeeded but did not return a file ID.');
     }
 
-    // Make uploaded audio publicly readable so visitors can stream without admin cookies.
-    try {
-      await drive.permissions.create({
-        fileId,
-        requestBody: {
-          type: 'anyone',
-          role: 'reader',
-        },
-      });
-    } catch (permissionError) {
-      console.warn('Could not set Drive file to public-read:', permissionError);
-    }
+    await ensureDriveFileIsPublic(drive, fileId);
 
     const publicUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
     res.json({ fileId, publicUrl });
@@ -516,18 +557,7 @@ app.post('/api/drive/publish', requireAdmin, async (req, res) => {
     const drive = getDriveService(req);
     const trimmedFileId = fileId.trim();
 
-    try {
-      await drive.permissions.create({
-        fileId: trimmedFileId,
-        requestBody: {
-          type: 'anyone',
-          role: 'reader',
-        },
-      });
-    } catch (permissionError) {
-      // If permission already exists, keep going.
-      console.warn('Could not create Drive public permission for file:', trimmedFileId, permissionError);
-    }
+    await ensureDriveFileIsPublic(drive, trimmedFileId);
 
     const publicUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(trimmedFileId)}`;
     res.json({ fileId: trimmedFileId, publicUrl });

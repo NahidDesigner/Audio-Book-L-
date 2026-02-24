@@ -124,9 +124,8 @@ const App: React.FC = () => {
   );
 
   const canPlayPart = useCallback(
-    (part: Part) =>
-      Boolean(part.audioBase64 || part.drivePublicUrl || (isAdmin && isDriveConnected && part.driveFileId)),
-    [isAdmin, isDriveConnected]
+    (part: Part) => Boolean(part.audioBase64 || part.drivePublicUrl || part.driveFileId),
+    []
   );
 
   const loadSharedLibrary = useCallback(async () => {
@@ -773,17 +772,21 @@ const App: React.FC = () => {
     if (!isAdmin) {
       return;
     }
+    if (!isDriveConnected) {
+      alert('Connect Google Drive first, then run repair.');
+      return;
+    }
 
     const targets = books.flatMap((book) =>
       book.chapters.flatMap((chapter) =>
         chapter.parts
-          .filter((part) => part.driveFileId && !part.drivePublicUrl)
+          .filter((part) => part.driveFileId)
           .map((part) => ({ partId: part.id, fileId: part.driveFileId as string }))
       )
     );
 
     if (targets.length === 0) {
-      alert('No missing public audio links found.');
+      alert('No Drive audio files found.');
       return;
     }
 
@@ -791,43 +794,46 @@ const App: React.FC = () => {
     const repairedLinks = new Map<string, string>();
     let failed = 0;
 
-    for (const target of targets) {
-      try {
-        const result = await publishDriveFile(target.fileId);
-        repairedLinks.set(target.partId, result.publicUrl || buildDrivePublicUrl(target.fileId));
-      } catch {
-        failed += 1;
+    try {
+      for (const target of targets) {
+        try {
+          const result = await publishDriveFile(target.fileId);
+          repairedLinks.set(target.partId, result.publicUrl || buildDrivePublicUrl(target.fileId));
+        } catch {
+          failed += 1;
+        }
       }
-    }
 
-    if (repairedLinks.size > 0) {
-      setBooks((prevBooks) =>
-        prevBooks.map((book) => ({
-          ...book,
-          chapters: book.chapters.map((chapter) => ({
-            ...chapter,
-            parts: chapter.parts.map((part) => {
-              const nextPublicUrl = repairedLinks.get(part.id);
-              if (!nextPublicUrl) {
-                return part;
-              }
-              return {
-                ...part,
-                drivePublicUrl: nextPublicUrl,
-              };
-            }),
-          })),
-        }))
+      if (repairedLinks.size > 0) {
+        setBooks((prevBooks) =>
+          prevBooks.map((book) => ({
+            ...book,
+            chapters: book.chapters.map((chapter) => ({
+              ...chapter,
+              parts: chapter.parts.map((part) => {
+                const nextPublicUrl = repairedLinks.get(part.id);
+                if (!nextPublicUrl) {
+                  return part;
+                }
+                return {
+                  ...part,
+                  drivePublicUrl: nextPublicUrl,
+                };
+              }),
+            })),
+          }))
+        );
+      }
+
+      const ok = repairedLinks.size;
+      alert(
+        failed > 0
+          ? `Repaired ${ok}/${targets.length} files. ${failed} failed. Check Drive sharing settings and retry.`
+          : `Repaired ${ok} public audio files.`
       );
+    } finally {
+      setIsRepairingPublicAudio(false);
     }
-
-    setIsRepairingPublicAudio(false);
-    const ok = repairedLinks.size;
-    alert(
-      failed > 0
-        ? `Repaired ${ok}/${targets.length} public links. ${failed} failed; try again after reconnecting Drive.`
-        : `Repaired ${ok} public audio links.`
-    );
   };
 
   const generatePartAudio = async (partId: string) => {
