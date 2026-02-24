@@ -7,6 +7,12 @@ interface LibraryRow {
   updated_at?: string;
 }
 
+export interface SupabaseConnectionInfo {
+  connected: boolean;
+  message: string;
+  latencyMs?: number;
+}
+
 const TABLE_NAME = 'lumina_library';
 const LEGACY_DEVICE_ID_KEY = 'lumina_device_id';
 const DEFAULT_SHARED_LIBRARY_KEY = 'public-library';
@@ -182,5 +188,47 @@ export async function saveBooksToSupabase(books: Book[]): Promise<void> {
 
   if (error) {
     throw new Error(`Supabase save failed: ${error.message}`);
+  }
+}
+
+export async function checkSupabaseConnection(): Promise<SupabaseConnectionInfo> {
+  if (!client) {
+    return {
+      connected: false,
+      message: 'Supabase is not configured at build time.',
+    };
+  }
+
+  const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+  try {
+    const response = (await withTimeout(
+      client.from(TABLE_NAME).select('device_id').limit(1),
+      10000,
+      'Supabase connection check'
+    )) as { error: { message: string } | null };
+
+    const latencyMs = Math.round(
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) - started
+    );
+
+    if (response.error) {
+      return {
+        connected: false,
+        message: response.error.message,
+        latencyMs,
+      };
+    }
+
+    return {
+      connected: true,
+      message: 'Connected',
+      latencyMs,
+    };
+  } catch (error: any) {
+    return {
+      connected: false,
+      message: error?.message || 'Connection check failed.',
+    };
   }
 }

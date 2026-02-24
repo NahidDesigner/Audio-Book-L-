@@ -34,7 +34,12 @@ import {
   logoutAdmin,
   uploadAudioToDrive,
 } from './services/apiService';
-import { clearLocalCache, loadBooks, saveBooks } from './services/storageService';
+import {
+  checkStorageConnection,
+  clearLocalCache,
+  loadBooks,
+  saveBooks,
+} from './services/storageService';
 import { Book, Chapter, Part, VOICES, VoiceName } from './types';
 import { makeId, pcmBase64ToMp3Base64, safeFileName } from './utils/audioUtils';
 
@@ -60,6 +65,7 @@ type PartModalState =
   | { mode: 'edit'; id: string };
 
 const GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
+type SupabaseStatus = 'unknown' | 'checking' | 'connected' | 'error';
 
 const App: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
@@ -80,6 +86,8 @@ const App: React.FC = () => {
   const [isAdminAuthBusy, setIsAdminAuthBusy] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
   const [isMobileTopbarOpen, setIsMobileTopbarOpen] = useState(false);
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatus>('unknown');
+  const [supabaseStatusMessage, setSupabaseStatusMessage] = useState('');
 
   const [isDriveConnected, setIsDriveConnected] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>(null);
@@ -118,25 +126,53 @@ const App: React.FC = () => {
     [isAdmin, isDriveConnected]
   );
 
-  useEffect(() => {
-    const initialize = async () => {
-      try {
-        const storedBooks = await loadBooks();
-        setBooks(storedBooks);
-        setInitialLoadFailed(false);
-        setInitialLoadError('');
-      } catch (error) {
-        console.error('Failed to load books:', error);
-        setBooks([]);
-        setInitialLoadFailed(true);
-        setInitialLoadError(error instanceof Error ? error.message : 'Unknown load error');
-      } finally {
-        setLoaded(true);
-      }
-    };
-
-    initialize();
+  const loadSharedLibrary = useCallback(async () => {
+    try {
+      const storedBooks = await loadBooks();
+      setBooks(storedBooks);
+      setInitialLoadFailed(false);
+      setInitialLoadError('');
+    } catch (error) {
+      console.error('Failed to load books:', error);
+      setBooks([]);
+      setInitialLoadFailed(true);
+      setInitialLoadError(error instanceof Error ? error.message : 'Unknown load error');
+    } finally {
+      setLoaded(true);
+    }
   }, []);
+
+  const handleCheckSupabaseConnection = useCallback(
+    async (resyncLibrary = true) => {
+      setSupabaseStatus('checking');
+      setSupabaseStatusMessage('');
+
+      try {
+        const info = await checkStorageConnection();
+        if (info.connected) {
+          const latencySuffix = typeof info.latencyMs === 'number' ? ` (${info.latencyMs}ms)` : '';
+          setSupabaseStatus('connected');
+          setSupabaseStatusMessage(`Connected${latencySuffix}`);
+
+          if (resyncLibrary) {
+            await loadSharedLibrary();
+          }
+          return;
+        }
+
+        setSupabaseStatus('error');
+        setSupabaseStatusMessage(info.message || 'Connection check failed.');
+      } catch (error) {
+        setSupabaseStatus('error');
+        setSupabaseStatusMessage(error instanceof Error ? error.message : 'Connection check failed.');
+      }
+    },
+    [loadSharedLibrary]
+  );
+
+  useEffect(() => {
+    loadSharedLibrary();
+  }, [loadSharedLibrary]);
 
   useEffect(() => {
     const checkAdminStatus = async () => {
@@ -151,6 +187,16 @@ const App: React.FC = () => {
 
     checkAdminStatus();
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setSupabaseStatus('unknown');
+      setSupabaseStatusMessage('');
+      return;
+    }
+
+    handleCheckSupabaseConnection(false);
+  }, [isAdmin, handleCheckSupabaseConnection]);
 
   useEffect(() => {
     if (!loaded) {
@@ -995,6 +1041,39 @@ const App: React.FC = () => {
             {isClearingCache ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
             Clear Cache
           </button>
+
+          {isAdmin && (
+            <button
+              className={
+                supabaseStatus === 'connected'
+                  ? 'soft-btn connected'
+                  : supabaseStatus === 'error'
+                    ? 'danger-btn'
+                    : 'soft-btn'
+              }
+              onClick={() => handleCheckSupabaseConnection(true)}
+              disabled={supabaseStatus === 'checking'}
+              title={
+                supabaseStatusMessage ||
+                'Check Supabase connection and sync the shared library from remote storage.'
+              }
+            >
+              {supabaseStatus === 'checking' ? (
+                <Loader2 className="spin" size={15} />
+              ) : supabaseStatus === 'connected' ? (
+                <CheckCircle2 size={15} />
+              ) : (
+                <CloudOff size={15} />
+              )}
+              {supabaseStatus === 'checking'
+                ? 'Supabase Checking'
+                : supabaseStatus === 'connected'
+                  ? 'Supabase Connected'
+                  : supabaseStatus === 'error'
+                    ? 'Supabase Offline'
+                    : 'Supabase Check'}
+            </button>
+          )}
 
           {isAdmin && (
             <button

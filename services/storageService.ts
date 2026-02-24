@@ -1,5 +1,7 @@
 import { Book } from '../types';
 import {
+  checkSupabaseConnection,
+  type SupabaseConnectionInfo,
   isSupabaseConfigured,
   loadBooksFromSupabase,
   saveBooksToSupabase,
@@ -42,4 +44,15 @@ export async function saveBooks(books: Book[]): Promise<void> {
 
 export async function clearLocalCache(): Promise<void> {
   await clearLegacyIndexedDb();
+}
+
+export async function checkStorageConnection(): Promise<SupabaseConnectionInfo> {
+  if (!isSupabaseConfigured()) {
+    return {
+      connected: false,
+      message: 'Supabase is not configured at build time.',
+    };
+  }
+
+  return checkSupabaseConnection();
 }
