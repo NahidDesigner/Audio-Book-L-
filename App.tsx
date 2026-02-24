@@ -1327,7 +1327,10 @@ const App: React.FC = () => {
                     }}
                   >
                     <h3>{chapter.title}</h3>
-                    <p>{chapter.parts.length} parts</p>
+                    <p>
+                      {chapter.parts.length} parts
+                      {chapter.summary ? ' • Insights available' : ''}
+                    </p>
                   </button>
 
                   {isAdmin && (
@@ -1503,7 +1506,11 @@ const App: React.FC = () => {
                   )}
 
                   {!selectedChapter.isAnalyzing && !selectedChapter.summary && (
-                    <p className="muted-row">Run Insights to generate summary and discussion questions.</p>
+                    <p className="muted-row">
+                      {isAdmin
+                        ? 'Run Insights to generate summary and discussion questions.'
+                        : 'Insights will appear here once published by admin.'}
+                    </p>
                   )}
 
                   {selectedChapter.summary && (
