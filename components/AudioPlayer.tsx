@@ -5,6 +5,7 @@ import { base64ToBlob, formatTime } from '../utils/audioUtils';
 interface AudioPlayerProps {
   audioBase64?: string;
   driveFileId?: string;
+  publicDriveFileId?: string;
   drivePublicUrl?: string;
   autoPlay?: boolean;
   onEnded?: () => void;
@@ -13,6 +14,7 @@ interface AudioPlayerProps {
 const AudioPlayer: React.FC<AudioPlayerProps> = ({
   audioBase64,
   driveFileId,
+  publicDriveFileId,
   drivePublicUrl,
   autoPlay = false,
   onEnded,
@@ -40,6 +42,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       setIsPlaying(false);
 
       try {
+        let lastSourceError: Error | null = null;
+
         if (audioBase64) {
           const blob = base64ToBlob(audioBase64, 'audio/mpeg');
           objectUrl = URL.createObjectURL(blob);
@@ -50,19 +54,42 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         }
 
         if (driveFileId) {
-          const response = await fetch(`/api/drive/stream/${driveFileId}`, {
-            credentials: 'include',
-            signal: controller.signal,
-          });
-          if (!response.ok) {
-            throw new Error(`Audio stream failed (${response.status})`);
+          try {
+            const response = await fetch(`/api/drive/stream/${driveFileId}`, {
+              credentials: 'include',
+              signal: controller.signal,
+            });
+            if (!response.ok) {
+              throw new Error(`Private stream failed (${response.status})`);
+            }
+            const blob = await response.blob();
+            objectUrl = URL.createObjectURL(blob);
+            if (!cancelled) {
+              setSourceUrl(objectUrl);
+            }
+            return;
+          } catch (error: any) {
+            lastSourceError = new Error(error?.message || 'Private stream failed.');
           }
-          const blob = await response.blob();
-          objectUrl = URL.createObjectURL(blob);
-          if (!cancelled) {
-            setSourceUrl(objectUrl);
+        }
+
+        if (publicDriveFileId) {
+          try {
+            const response = await fetch(`/api/drive/public-stream/${encodeURIComponent(publicDriveFileId)}`, {
+              signal: controller.signal,
+            });
+            if (!response.ok) {
+              throw new Error(`Public stream failed (${response.status})`);
+            }
+            const blob = await response.blob();
+            objectUrl = URL.createObjectURL(blob);
+            if (!cancelled) {
+              setSourceUrl(objectUrl);
+            }
+            return;
+          } catch (error: any) {
+            lastSourceError = new Error(error?.message || 'Public stream failed.');
           }
-          return;
         }
 
         if (drivePublicUrl) {
@@ -70,6 +97,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
             setSourceUrl(drivePublicUrl);
           }
           return;
+        }
+
+        if (lastSourceError) {
+          throw lastSourceError;
         }
       } catch (error: any) {
         if (!cancelled && !controller.signal.aborted) {
@@ -91,7 +122,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [audioBase64, driveFileId, drivePublicUrl]);
+  }, [audioBase64, driveFileId, publicDriveFileId, drivePublicUrl]);
 
   useEffect(() => {
     const audio = audioRef.current;

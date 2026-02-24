@@ -567,6 +567,46 @@ app.post('/api/drive/publish', requireAdmin, async (req, res) => {
   }
 });
 
+app.get('/api/drive/public-stream/:fileId', async (req, res) => {
+  try {
+    const fileId = req.params.fileId;
+    if (!fileId) {
+      return jsonError(res, 400, 'fileId is required.');
+    }
+
+    const publicUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
+    const upstream = await fetch(publicUrl, { redirect: 'follow' });
+
+    if (!upstream.ok) {
+      return jsonError(res, upstream.status, `Public Drive stream failed (${upstream.status}).`);
+    }
+
+    const contentType = upstream.headers.get('content-type');
+    if (contentType) {
+      res.setHeader('Content-Type', contentType);
+    } else {
+      res.setHeader('Content-Type', 'audio/mpeg');
+    }
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+
+    if (!upstream.body) {
+      return jsonError(res, 502, 'Public Drive stream returned no body.');
+    }
+
+    Readable.fromWeb(upstream.body as any)
+      .on('error', (streamError: Error) => {
+        console.error('Public Drive stream pipe failed:', streamError);
+        if (!res.headersSent) {
+          res.status(500).end();
+        }
+      })
+      .pipe(res);
+  } catch (error: any) {
+    console.error('Public Drive streaming failed:', error);
+    jsonError(res, 500, error?.message || 'Public Drive stream failed.');
+  }
+});
+
 app.get('/api/drive/stream/:fileId', async (req, res) => {
   try {
     const fileId = req.params.fileId;

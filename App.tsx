@@ -301,6 +301,31 @@ const App: React.FC = () => {
   const buildDrivePublicUrl = (fileId: string): string =>
     `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
 
+  const parseDriveFileIdFromUrl = (urlValue?: string): string | null => {
+    if (!urlValue) {
+      return null;
+    }
+
+    try {
+      const parsed = new URL(urlValue);
+      const idFromQuery = parsed.searchParams.get('id');
+      if (idFromQuery) {
+        return idFromQuery;
+      }
+      const pathMatch = parsed.pathname.match(/\/d\/([^/]+)/);
+      if (pathMatch?.[1]) {
+        return pathMatch[1];
+      }
+    } catch {
+      const looseMatch = urlValue.match(/[?&]id=([^&]+)/);
+      if (looseMatch?.[1]) {
+        return decodeURIComponent(looseMatch[1]);
+      }
+    }
+
+    return null;
+  };
+
   const cancelPartGeneration = (
     partId: string,
     location?: { bookId: string; chapterId: string },
@@ -777,30 +802,40 @@ const App: React.FC = () => {
       return;
     }
 
-    const targets = books.flatMap((book) =>
-      book.chapters.flatMap((chapter) =>
-        chapter.parts
-          .filter((part) => part.driveFileId)
-          .map((part) => ({ partId: part.id, fileId: part.driveFileId as string }))
-      )
-    );
+    const targetByPartId = new Map<string, string>();
+    books.forEach((book) => {
+      book.chapters.forEach((chapter) => {
+        chapter.parts.forEach((part) => {
+          const resolvedFileId = part.driveFileId || parseDriveFileIdFromUrl(part.drivePublicUrl);
+          if (resolvedFileId) {
+            targetByPartId.set(part.id, resolvedFileId);
+          }
+        });
+      });
+    });
+
+    const targets = Array.from(targetByPartId.entries()).map(([partId, fileId]) => ({ partId, fileId }));
 
     if (targets.length === 0) {
-      alert('No Drive audio files found.');
+      alert('No Drive file IDs found in the current library.');
       return;
     }
 
     setIsRepairingPublicAudio(true);
     const repairedLinks = new Map<string, string>();
     let failed = 0;
+    let firstFailureMessage = '';
 
     try {
       for (const target of targets) {
         try {
           const result = await publishDriveFile(target.fileId);
           repairedLinks.set(target.partId, result.publicUrl || buildDrivePublicUrl(target.fileId));
-        } catch {
+        } catch (error: any) {
           failed += 1;
+          if (!firstFailureMessage) {
+            firstFailureMessage = error?.message || 'Unknown publish error.';
+          }
         }
       }
 
@@ -817,6 +852,7 @@ const App: React.FC = () => {
                 }
                 return {
                   ...part,
+                  driveFileId: part.driveFileId || parseDriveFileIdFromUrl(nextPublicUrl) || undefined,
                   drivePublicUrl: nextPublicUrl,
                 };
               }),
@@ -828,7 +864,7 @@ const App: React.FC = () => {
       const ok = repairedLinks.size;
       alert(
         failed > 0
-          ? `Repaired ${ok}/${targets.length} files. ${failed} failed. Check Drive sharing settings and retry.`
+          ? `Repaired ${ok}/${targets.length} files. ${failed} failed. ${firstFailureMessage}`
           : `Repaired ${ok} public audio files.`
       );
     } finally {
@@ -1439,6 +1475,7 @@ const App: React.FC = () => {
                       {hasAudio && isActive && (
                         <AudioPlayer
                           audioBase64={part.audioBase64}
+                          publicDriveFileId={part.driveFileId}
                           drivePublicUrl={
                             part.drivePublicUrl ||
                             (part.driveFileId ? buildDrivePublicUrl(part.driveFileId) : undefined)
