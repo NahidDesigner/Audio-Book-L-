@@ -49,13 +49,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           return;
         }
 
-        if (drivePublicUrl) {
-          if (!cancelled) {
-            setSourceUrl(drivePublicUrl);
-          }
-          return;
-        }
-
         if (driveFileId) {
           const response = await fetch(`/api/drive/stream/${driveFileId}`, {
             credentials: 'include',
@@ -68,6 +61,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           objectUrl = URL.createObjectURL(blob);
           if (!cancelled) {
             setSourceUrl(objectUrl);
+          }
+          return;
+        }
+
+        if (drivePublicUrl) {
+          if (!cancelled) {
+            setSourceUrl(drivePublicUrl);
           }
           return;
         }
