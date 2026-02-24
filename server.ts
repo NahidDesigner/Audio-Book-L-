@@ -506,6 +506,37 @@ app.post('/api/drive/upload', requireAdmin, async (req, res) => {
   }
 });
 
+app.post('/api/drive/publish', requireAdmin, async (req, res) => {
+  try {
+    const { fileId } = req.body as { fileId?: string };
+    if (!fileId || !fileId.trim()) {
+      return jsonError(res, 400, 'fileId is required.');
+    }
+
+    const drive = getDriveService(req);
+    const trimmedFileId = fileId.trim();
+
+    try {
+      await drive.permissions.create({
+        fileId: trimmedFileId,
+        requestBody: {
+          type: 'anyone',
+          role: 'reader',
+        },
+      });
+    } catch (permissionError) {
+      // If permission already exists, keep going.
+      console.warn('Could not create Drive public permission for file:', trimmedFileId, permissionError);
+    }
+
+    const publicUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(trimmedFileId)}`;
+    res.json({ fileId: trimmedFileId, publicUrl });
+  } catch (error: any) {
+    console.error('Drive publish failed:', error);
+    jsonError(res, 500, error?.message || 'Drive publish failed.');
+  }
+});
+
 app.get('/api/drive/stream/:fileId', async (req, res) => {
   try {
     const fileId = req.params.fileId;

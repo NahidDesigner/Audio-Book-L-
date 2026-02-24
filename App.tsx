@@ -32,6 +32,7 @@ import {
   generateTtsAudio,
   loginAsAdmin,
   logoutAdmin,
+  publishDriveFile,
   uploadAudioToDrive,
 } from './services/apiService';
 import {
@@ -85,6 +86,7 @@ const App: React.FC = () => {
   const [adminAuthError, setAdminAuthError] = useState('');
   const [isAdminAuthBusy, setIsAdminAuthBusy] = useState(false);
   const [isClearingCache, setIsClearingCache] = useState(false);
+  const [isRepairingPublicAudio, setIsRepairingPublicAudio] = useState(false);
   const [isMobileTopbarOpen, setIsMobileTopbarOpen] = useState(false);
   const [supabaseStatus, setSupabaseStatus] = useState<SupabaseStatus>('unknown');
   const [supabaseStatusMessage, setSupabaseStatusMessage] = useState('');
@@ -296,6 +298,9 @@ const App: React.FC = () => {
     delete generationControllersRef.current[partId];
     delete generationRunIdsRef.current[partId];
   };
+
+  const buildDrivePublicUrl = (fileId: string): string =>
+    `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
 
   const cancelPartGeneration = (
     partId: string,
@@ -764,6 +769,67 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRepairPublicAudioLinks = async () => {
+    if (!isAdmin) {
+      return;
+    }
+
+    const targets = books.flatMap((book) =>
+      book.chapters.flatMap((chapter) =>
+        chapter.parts
+          .filter((part) => part.driveFileId && !part.drivePublicUrl)
+          .map((part) => ({ partId: part.id, fileId: part.driveFileId as string }))
+      )
+    );
+
+    if (targets.length === 0) {
+      alert('No missing public audio links found.');
+      return;
+    }
+
+    setIsRepairingPublicAudio(true);
+    const repairedLinks = new Map<string, string>();
+    let failed = 0;
+
+    for (const target of targets) {
+      try {
+        const result = await publishDriveFile(target.fileId);
+        repairedLinks.set(target.partId, result.publicUrl || buildDrivePublicUrl(target.fileId));
+      } catch {
+        failed += 1;
+      }
+    }
+
+    if (repairedLinks.size > 0) {
+      setBooks((prevBooks) =>
+        prevBooks.map((book) => ({
+          ...book,
+          chapters: book.chapters.map((chapter) => ({
+            ...chapter,
+            parts: chapter.parts.map((part) => {
+              const nextPublicUrl = repairedLinks.get(part.id);
+              if (!nextPublicUrl) {
+                return part;
+              }
+              return {
+                ...part,
+                drivePublicUrl: nextPublicUrl,
+              };
+            }),
+          })),
+        }))
+      );
+    }
+
+    setIsRepairingPublicAudio(false);
+    const ok = repairedLinks.size;
+    alert(
+      failed > 0
+        ? `Repaired ${ok}/${targets.length} public links. ${failed} failed; try again after reconnecting Drive.`
+        : `Repaired ${ok} public audio links.`
+    );
+  };
+
   const generatePartAudio = async (partId: string) => {
     if (!isAdmin) {
       return;
@@ -1083,6 +1149,18 @@ const App: React.FC = () => {
             </button>
           )}
 
+          {isAdmin && (
+            <button
+              className="soft-btn"
+              onClick={handleRepairPublicAudioLinks}
+              disabled={!isDriveConnected || isRepairingPublicAudio}
+              title="Publish old Drive files for public playback and save missing public URLs."
+            >
+              {isRepairingPublicAudio ? <Loader2 className="spin" size={15} /> : <RefreshCcw size={15} />}
+              Repair Public Audio
+            </button>
+          )}
+
           {isAdmin ? (
             <button className="soft-btn connected" onClick={handleAdminLogout}>
               <LogOut size={15} /> Admin Logout
@@ -1126,8 +1204,7 @@ const App: React.FC = () => {
           <section>
             <div className="section-header">
               <div>
-                <h2>Your Library</h2>
-                <p>Browse and listen publicly. Admin can create, edit, and generate narration.</p>
+                <h2>Library</h2>
               </div>
               {isAdmin && (
                 <button className="primary-btn" onClick={openAddBook}>
@@ -1310,7 +1387,9 @@ const App: React.FC = () => {
                         )}
                       </div>
 
-                      <p className="part-preview">{part.content.slice(0, 220)}{part.content.length > 220 ? '...' : ''}</p>
+                      {isAdmin && (
+                        <p className="muted-row">Narration text is hidden. Use Edit to view or update it.</p>
+                      )}
 
                       {!part.isGenerating && isAdmin && (
                         <button
@@ -1354,7 +1433,10 @@ const App: React.FC = () => {
                       {hasAudio && isActive && (
                         <AudioPlayer
                           audioBase64={part.audioBase64}
-                          drivePublicUrl={part.drivePublicUrl}
+                          drivePublicUrl={
+                            part.drivePublicUrl ||
+                            (part.driveFileId ? buildDrivePublicUrl(part.driveFileId) : undefined)
+                          }
                           driveFileId={isAdmin && isDriveConnected ? part.driveFileId : undefined}
                           autoPlay
                           onEnded={handlePartFinished}

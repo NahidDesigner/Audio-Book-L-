@@ -120,3 +120,14 @@ export async function uploadAudioToDrive(
 
   return parseResponse<{ fileId: string; publicUrl?: string }>(response);
 }
+
+export async function publishDriveFile(fileId: string): Promise<{ fileId: string; publicUrl: string }> {
+  const response = await fetch('/api/drive/publish', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileId }),
+  });
+
+  return parseResponse<{ fileId: string; publicUrl: string }>(response);
+}
