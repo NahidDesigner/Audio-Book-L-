@@ -65,6 +65,7 @@ const App: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [initialLoadFailed, setInitialLoadFailed] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState('');
 
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
@@ -123,10 +124,12 @@ const App: React.FC = () => {
         const storedBooks = await loadBooks();
         setBooks(storedBooks);
         setInitialLoadFailed(false);
+        setInitialLoadError('');
       } catch (error) {
         console.error('Failed to load books:', error);
         setBooks([]);
         setInitialLoadFailed(true);
+        setInitialLoadError(error instanceof Error ? error.message : 'Unknown load error');
       } finally {
         setLoaded(true);
       }
@@ -1033,7 +1036,8 @@ const App: React.FC = () => {
       <main className="main-layout">
         {initialLoadFailed && (
           <p className="error-text">
-            Could not load shared library from Supabase. Check Supabase availability and redeploy settings.
+            Could not load shared library from Supabase.
+            {initialLoadError ? ` ${initialLoadError}` : ' Check Supabase availability and redeploy settings.'}
           </p>
         )}
 
