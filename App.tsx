@@ -946,15 +946,6 @@ const App: React.FC = () => {
     setActivePartId(null);
   }, [autoplayEnabled, canPlayPart, selectedChapter, activePartId]);
 
-  if (!loaded) {
-    return (
-      <div className="app-loading">
-        <Loader2 className="spin" size={42} />
-        <p>Loading Lumina workspace...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="app-shell">
       <button
@@ -1034,6 +1025,12 @@ const App: React.FC = () => {
       </header>
 
       <main className="main-layout">
+        {!loaded && (
+          <p className="muted-row">
+            <Loader2 className="spin" size={14} /> Syncing library...
+          </p>
+        )}
+
         {initialLoadFailed && (
           <p className="error-text">
             Could not load shared library from Supabase.
