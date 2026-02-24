@@ -480,7 +480,26 @@ app.post('/api/drive/upload', requireAdmin, async (req, res) => {
       fields: 'id,name,mimeType',
     });
 
-    res.json({ fileId: createdFile.data.id });
+    const fileId = createdFile.data.id;
+    if (!fileId) {
+      return jsonError(res, 500, 'Drive upload succeeded but did not return a file ID.');
+    }
+
+    // Make uploaded audio publicly readable so visitors can stream without admin cookies.
+    try {
+      await drive.permissions.create({
+        fileId,
+        requestBody: {
+          type: 'anyone',
+          role: 'reader',
+        },
+      });
+    } catch (permissionError) {
+      console.warn('Could not set Drive file to public-read:', permissionError);
+    }
+
+    const publicUrl = `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
+    res.json({ fileId, publicUrl });
   } catch (error: any) {
     console.error('Drive upload failed:', error);
     jsonError(res, 500, error?.message || 'Drive upload failed.');

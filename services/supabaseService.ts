@@ -94,6 +94,23 @@ function getLegacyDeviceId(): string | null {
   }
 }
 
+function sanitizeBooksForSupabase(books: Book[]): Book[] {
+  return books.map((book) => ({
+    ...book,
+    chapters: book.chapters.map((chapter) => ({
+      ...chapter,
+      parts: chapter.parts.map((part) => {
+        if (part.audioBase64 && (part.driveFileId || part.drivePublicUrl)) {
+          const withoutEmbeddedAudio = { ...part };
+          delete withoutEmbeddedAudio.audioBase64;
+          return withoutEmbeddedAudio;
+        }
+        return part;
+      }),
+    })),
+  }));
+}
+
 async function fetchBooksByKey(key: string): Promise<Book[] | null> {
   if (!client) {
     return null;
@@ -163,6 +180,7 @@ export async function saveBooksToSupabase(books: Book[]): Promise<void> {
   if (!client) {
     return;
   }
+  const sanitizedBooks = sanitizeBooksForSupabase(books);
 
   const response = (await withRetry(
     () =>
@@ -170,7 +188,7 @@ export async function saveBooksToSupabase(books: Book[]): Promise<void> {
         client.from(TABLE_NAME).upsert(
           {
             device_id: sharedLibraryKey,
-            books,
+            books: sanitizedBooks,
             updated_at: new Date().toISOString(),
           },
           {

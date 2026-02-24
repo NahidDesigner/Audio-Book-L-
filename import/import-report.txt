@@ -1,0 +1,7 @@
+Input: /Users/nahid/Downloads/Supabase Snippet Library Books Lookup.csv
+Output CSV: /Volumes/Nahid s980/Ag projects/lumina/lumina/import/Supabase-Snippet-Library-Books-Lookup.cleaned.csv
+Output JSON: /Volumes/Nahid s980/Ag projects/lumina/lumina/import/public-library.cleaned.json
+Books count: 1
+audioBase64 fields removed: 3
+Cleaned JSON size bytes: 15436
+Cleaned CSV size bytes: 15583

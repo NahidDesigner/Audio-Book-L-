@@ -110,7 +110,7 @@ export async function uploadAudioToDrive(
   base64Audio: string,
   filename: string,
   mimeType = 'audio/mpeg'
-): Promise<string> {
+): Promise<{ fileId: string; publicUrl?: string }> {
   const response = await fetch('/api/drive/upload', {
     method: 'POST',
     credentials: 'include',
@@ -118,6 +118,5 @@ export async function uploadAudioToDrive(
     body: JSON.stringify({ base64Audio, filename, mimeType }),
   });
 
-  const data = await parseResponse<{ fileId: string }>(response);
-  return data.fileId;
+  return parseResponse<{ fileId: string; publicUrl?: string }>(response);
 }

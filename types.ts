@@ -9,6 +9,7 @@ export interface Part {
   voiceName: VoiceName;
   audioBase64?: string;
   driveFileId?: string;
+  drivePublicUrl?: string;
   isGenerating: boolean;
   progress: number;
   error?: string;

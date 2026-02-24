@@ -122,7 +122,8 @@ const App: React.FC = () => {
   );
 
   const canPlayPart = useCallback(
-    (part: Part) => Boolean(part.audioBase64 || (isAdmin && isDriveConnected && part.driveFileId)),
+    (part: Part) =>
+      Boolean(part.audioBase64 || part.drivePublicUrl || (isAdmin && isDriveConnected && part.driveFileId)),
     [isAdmin, isDriveConnected]
   );
 
@@ -577,6 +578,7 @@ const App: React.FC = () => {
                     voiceName: partDraft.voiceName,
                     audioBase64: contentChanged ? undefined : part.audioBase64,
                     driveFileId: contentChanged ? undefined : part.driveFileId,
+                    drivePublicUrl: contentChanged ? undefined : part.drivePublicUrl,
                     error: undefined,
                   };
                 }),
@@ -776,6 +778,11 @@ const App: React.FC = () => {
       return;
     }
 
+    if (!isDriveConnected) {
+      alert('Connect Google Drive first. Narration is now published to Drive and stored by URL.');
+      return;
+    }
+
     const bookId = selectedBook.id;
     const chapterId = selectedChapter.id;
     const runId = makeId('gen');
@@ -827,34 +834,25 @@ const App: React.FC = () => {
         return;
       }
 
-      if (isDriveConnected) {
-        updatePartByLocation(bookId, chapterId, partId, { progress: 96 });
-        const baseName =
-          safeFileName(`${selectedBook.title}-${selectedChapter.title}-${targetPart.title}`) ||
-          `lumina-${partId}`;
-        const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const filename = `${baseName}-${uniqueSuffix}.mp3`;
-        const fileId = await uploadAudioToDrive(audioBase64, filename);
-        if (generationRunIdsRef.current[partId] !== runId) {
-          return;
-        }
-
-        updatePartByLocation(bookId, chapterId, partId, {
-          isGenerating: false,
-          progress: 100,
-          audioBase64,
-          driveFileId: fileId,
-          error: undefined,
-        });
-      } else {
-        updatePartByLocation(bookId, chapterId, partId, {
-          isGenerating: false,
-          progress: 100,
-          audioBase64,
-          driveFileId: undefined,
-          error: undefined,
-        });
+      updatePartByLocation(bookId, chapterId, partId, { progress: 96 });
+      const baseName =
+        safeFileName(`${selectedBook.title}-${selectedChapter.title}-${targetPart.title}`) ||
+        `lumina-${partId}`;
+      const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const filename = `${baseName}-${uniqueSuffix}.mp3`;
+      const uploadResult = await uploadAudioToDrive(audioBase64, filename);
+      if (generationRunIdsRef.current[partId] !== runId) {
+        return;
       }
+
+      updatePartByLocation(bookId, chapterId, partId, {
+        isGenerating: false,
+        progress: 100,
+        audioBase64: undefined,
+        driveFileId: uploadResult.fileId,
+        drivePublicUrl: uploadResult.publicUrl,
+        error: undefined,
+      });
     } catch (error: any) {
       if (generationRunIdsRef.current[partId] !== runId) {
         return;
@@ -1356,7 +1354,8 @@ const App: React.FC = () => {
                       {hasAudio && isActive && (
                         <AudioPlayer
                           audioBase64={part.audioBase64}
-                          driveFileId={isDriveConnected ? part.driveFileId : undefined}
+                          drivePublicUrl={part.drivePublicUrl}
+                          driveFileId={isAdmin && isDriveConnected ? part.driveFileId : undefined}
                           autoPlay
                           onEnded={handlePartFinished}
                         />
