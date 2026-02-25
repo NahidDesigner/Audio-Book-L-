@@ -4,13 +4,21 @@ import { BookOpen, Trash2, PencilLine } from 'lucide-react';
 
 interface BookCardProps {
   book: Book;
+  viewMode?: 'grid' | 'list';
   onOpen: (bookId: string) => void;
   onEdit?: (bookId: string) => void;
   onDelete?: (bookId: string) => void;
   canManage?: boolean;
 }
 
-const BookCard: React.FC<BookCardProps> = ({ book, onOpen, onEdit, onDelete, canManage = false }) => {
+const BookCard: React.FC<BookCardProps> = ({
+  book,
+  viewMode = 'grid',
+  onOpen,
+  onEdit,
+  onDelete,
+  canManage = false,
+}) => {
   const totalParts = book.chapters.reduce((acc, chapter) => acc + chapter.parts.length, 0);
   const narratedParts = book.chapters.reduce(
     (acc, chapter) =>
@@ -21,7 +29,7 @@ const BookCard: React.FC<BookCardProps> = ({ book, onOpen, onEdit, onDelete, can
   );
 
   return (
-    <article className="book-card">
+    <article className={viewMode === 'list' ? 'book-card list-mode' : 'book-card'}>
       <button className="book-cover-wrap" onClick={() => onOpen(book.id)}>
         <img className="book-cover" src={book.coverUrl} alt={book.title} loading="lazy" />
       </button>

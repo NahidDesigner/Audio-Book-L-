@@ -143,10 +143,42 @@ button {
   justify-content: flex-end;
 }
 
+.view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.view-toggle-btn {
+  border: 0;
+  background: transparent;
+  color: #d9e5f2;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.view-toggle-btn.active {
+  background: rgba(95, 208, 197, 0.2);
+  color: #eafaf8;
+}
+
 .book-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 14px;
+}
+
+.book-grid.list-mode {
+  grid-template-columns: 1fr;
 }
 
 .book-card {
@@ -155,6 +187,37 @@ button {
   overflow: hidden;
   background: linear-gradient(180deg, rgba(23, 44, 64, 0.95), rgba(15, 31, 46, 0.95));
   box-shadow: var(--shadow);
+}
+
+.book-card.list-mode {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.book-card.list-mode .book-cover-wrap {
+  height: 100%;
+}
+
+.book-card.list-mode .book-cover {
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.book-card.list-mode .book-content {
+  padding: 12px;
+  gap: 6px;
+}
+
+.book-card.list-mode .book-title {
+  font-size: 1.04rem;
+}
+
+.book-card.list-mode .book-desc {
+  min-height: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .book-cover-wrap {
@@ -700,7 +763,79 @@ button {
   }
 
   .book-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .book-grid.list-mode {
     grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .book-cover {
+    aspect-ratio: 4 / 5;
+  }
+
+  .book-content {
+    padding: 10px;
+    gap: 6px;
+  }
+
+  .book-title {
+    font-size: 0.98rem;
+  }
+
+  .book-author {
+    font-size: 0.78rem;
+  }
+
+  .book-desc {
+    min-height: 0;
+    font-size: 0.78rem;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .book-meta {
+    font-size: 0.7rem;
+  }
+
+  .book-actions {
+    gap: 6px;
+  }
+
+  .book-actions .ghost-btn,
+  .book-actions .danger-btn {
+    padding: 7px 8px;
+    font-size: 0.76rem;
+    gap: 5px;
+    border-radius: 8px;
+  }
+
+  .book-card.list-mode {
+    grid-template-columns: 92px minmax(0, 1fr);
+    border-radius: 14px;
+  }
+
+  .book-card.list-mode .book-content {
+    padding: 9px;
+    gap: 5px;
+  }
+
+  .book-card.list-mode .book-desc {
+    -webkit-line-clamp: 1;
+  }
+
+  .view-toggle {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .view-toggle-btn {
+    flex: 1;
+    justify-content: center;
   }
 
   .row-grid {

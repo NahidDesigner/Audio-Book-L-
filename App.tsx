@@ -6,7 +6,9 @@ import {
   CheckCircle2,
   Cloud,
   CloudOff,
+  Grid2x2,
   House,
+  List,
   Loader2,
   LogIn,
   LogOut,
@@ -67,6 +69,8 @@ type PartModalState =
 
 const GENERATION_TIMEOUT_MS = 2 * 60 * 1000;
 type SupabaseStatus = 'unknown' | 'checking' | 'connected' | 'error';
+type LibraryViewMode = 'grid' | 'list';
+const LIBRARY_VIEW_STORAGE_KEY = 'lumina_library_view_mode';
 
 const App: React.FC = () => {
   const [books, setBooks] = useState<Book[]>([]);
@@ -78,6 +82,22 @@ const App: React.FC = () => {
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
   const [activePartId, setActivePartId] = useState<string | null>(null);
   const [autoplayEnabled, setAutoplayEnabled] = useState(true);
+  const [libraryViewMode, setLibraryViewMode] = useState<LibraryViewMode>(() => {
+    if (typeof window === 'undefined') {
+      return 'grid';
+    }
+
+    try {
+      const stored = localStorage.getItem(LIBRARY_VIEW_STORAGE_KEY);
+      if (stored === 'grid' || stored === 'list') {
+        return stored;
+      }
+    } catch {
+      // ignore storage read errors and use fallback
+    }
+
+    return window.matchMedia('(max-width: 640px)').matches ? 'list' : 'grid';
+  });
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
@@ -212,6 +232,14 @@ const App: React.FC = () => {
       console.error('Failed to persist books:', error);
     });
   }, [books, loaded, initialLoadFailed]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LIBRARY_VIEW_STORAGE_KEY, libraryViewMode);
+    } catch {
+      // ignore storage write errors
+    }
+  }, [libraryViewMode]);
 
   useEffect(() => {
     const checkDrive = async () => {
@@ -1252,21 +1280,45 @@ const App: React.FC = () => {
               <div>
                 <h2>Library</h2>
               </div>
-              {isAdmin && (
-                <button className="primary-btn" onClick={openAddBook}>
-                  <BookPlus size={17} /> New Book
-                </button>
-              )}
+              <div className="section-actions-wrap">
+                <div className="view-toggle" role="group" aria-label="Library view mode">
+                  <button
+                    type="button"
+                    className={libraryViewMode === 'grid' ? 'view-toggle-btn active' : 'view-toggle-btn'}
+                    onClick={() => setLibraryViewMode('grid')}
+                    aria-pressed={libraryViewMode === 'grid'}
+                    title="Grid view"
+                  >
+                    <Grid2x2 size={14} /> Grid
+                  </button>
+                  <button
+                    type="button"
+                    className={libraryViewMode === 'list' ? 'view-toggle-btn active' : 'view-toggle-btn'}
+                    onClick={() => setLibraryViewMode('list')}
+                    aria-pressed={libraryViewMode === 'list'}
+                    title="List view"
+                  >
+                    <List size={14} /> List
+                  </button>
+                </div>
+
+                {isAdmin && (
+                  <button className="primary-btn" onClick={openAddBook}>
+                    <BookPlus size={17} /> New Book
+                  </button>
+                )}
+              </div>
             </div>
 
             {books.length === 0 ? (
               <div className="empty-state">No books yet. Create your first one.</div>
             ) : (
-              <div className="book-grid">
+              <div className={libraryViewMode === 'list' ? 'book-grid list-mode' : 'book-grid'}>
                 {books.map((book) => (
                   <BookCard
                     key={book.id}
                     book={book}
+                    viewMode={libraryViewMode}
                     onOpen={(bookId) => setSelectedBookId(bookId)}
                     canManage={isAdmin}
                     onEdit={openEditBook}
