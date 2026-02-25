@@ -94,13 +94,37 @@ function getLegacyDeviceId(): string | null {
   }
 }
 
-function sanitizeBooksForSupabase(books: Book[]): Book[] {
+function buildDrivePublicUrl(fileId: string): string {
+  return `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
+}
+
+function normalizeBooksForClient(books: Book[]): Book[] {
   return books.map((book) => ({
     ...book,
     chapters: book.chapters.map((chapter) => ({
       ...chapter,
       parts: chapter.parts.map((part) => {
-        if (part.audioBase64 && (part.driveFileId || part.drivePublicUrl)) {
+        const normalizedAudioUrl =
+          part.audioUrl || part.drivePublicUrl || (part.driveFileId ? buildDrivePublicUrl(part.driveFileId) : undefined);
+        const normalizedDrivePublicUrl = part.drivePublicUrl || normalizedAudioUrl;
+
+        return {
+          ...part,
+          audioUrl: normalizedAudioUrl,
+          drivePublicUrl: normalizedDrivePublicUrl,
+        };
+      }),
+    })),
+  }));
+}
+
+function sanitizeBooksForSupabase(books: Book[]): Book[] {
+  return normalizeBooksForClient(books).map((book) => ({
+    ...book,
+    chapters: book.chapters.map((chapter) => ({
+      ...chapter,
+      parts: chapter.parts.map((part) => {
+        if (part.audioBase64 && (part.driveFileId || part.drivePublicUrl || part.audioUrl)) {
           const withoutEmbeddedAudio = { ...part };
           delete withoutEmbeddedAudio.audioBase64;
           return withoutEmbeddedAudio;
@@ -143,7 +167,7 @@ async function fetchBooksByKey(key: string): Promise<Book[] | null> {
     return [];
   }
 
-  return data.books;
+  return normalizeBooksForClient(data.books);
 }
 
 export function isSupabaseConfigured(): boolean {

@@ -124,7 +124,7 @@ const App: React.FC = () => {
   );
 
   const canPlayPart = useCallback(
-    (part: Part) => Boolean(part.audioBase64 || part.drivePublicUrl || part.driveFileId),
+    (part: Part) => Boolean(part.audioBase64 || part.audioUrl || part.drivePublicUrl || part.driveFileId),
     []
   );
 
@@ -606,6 +606,7 @@ const App: React.FC = () => {
                     content: partDraft.content.trim(),
                     voiceName: partDraft.voiceName,
                     audioBase64: contentChanged ? undefined : part.audioBase64,
+                    audioUrl: contentChanged ? undefined : part.audioUrl,
                     driveFileId: contentChanged ? undefined : part.driveFileId,
                     drivePublicUrl: contentChanged ? undefined : part.drivePublicUrl,
                     error: undefined,
@@ -806,7 +807,8 @@ const App: React.FC = () => {
     books.forEach((book) => {
       book.chapters.forEach((chapter) => {
         chapter.parts.forEach((part) => {
-          const resolvedFileId = part.driveFileId || parseDriveFileIdFromUrl(part.drivePublicUrl);
+          const resolvedFileId =
+            part.driveFileId || parseDriveFileIdFromUrl(part.audioUrl) || parseDriveFileIdFromUrl(part.drivePublicUrl);
           if (resolvedFileId) {
             targetByPartId.set(part.id, resolvedFileId);
           }
@@ -853,6 +855,7 @@ const App: React.FC = () => {
                 return {
                   ...part,
                   driveFileId: part.driveFileId || parseDriveFileIdFromUrl(nextPublicUrl) || undefined,
+                  audioUrl: nextPublicUrl,
                   drivePublicUrl: nextPublicUrl,
                 };
               }),
@@ -958,6 +961,7 @@ const App: React.FC = () => {
         progress: 100,
         audioBase64: undefined,
         driveFileId: uploadResult.fileId,
+        audioUrl: uploadResult.publicUrl || buildDrivePublicUrl(uploadResult.fileId),
         drivePublicUrl: uploadResult.publicUrl,
         error: undefined,
       });
@@ -1478,9 +1482,11 @@ const App: React.FC = () => {
                       {hasAudio && isActive && (
                         <AudioPlayer
                           audioBase64={part.audioBase64}
+                          audioUrl={part.audioUrl}
                           publicDriveFileId={part.driveFileId}
                           drivePublicUrl={
                             part.drivePublicUrl ||
+                            part.audioUrl ||
                             (part.driveFileId ? buildDrivePublicUrl(part.driveFileId) : undefined)
                           }
                           driveFileId={isAdmin && isDriveConnected ? part.driveFileId : undefined}

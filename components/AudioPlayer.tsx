@@ -4,6 +4,7 @@ import { base64ToBlob, formatTime } from '../utils/audioUtils';
 
 interface AudioPlayerProps {
   audioBase64?: string;
+  audioUrl?: string;
   driveFileId?: string;
   publicDriveFileId?: string;
   drivePublicUrl?: string;
@@ -13,6 +14,7 @@ interface AudioPlayerProps {
 
 const AudioPlayer: React.FC<AudioPlayerProps> = ({
   audioBase64,
+  audioUrl,
   driveFileId,
   publicDriveFileId,
   drivePublicUrl,
@@ -92,6 +94,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           }
         }
 
+        if (audioUrl) {
+          if (!cancelled) {
+            setSourceUrl(audioUrl);
+          }
+          return;
+        }
+
         if (drivePublicUrl) {
           if (!cancelled) {
             setSourceUrl(drivePublicUrl);
@@ -122,7 +131,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [audioBase64, driveFileId, publicDriveFileId, drivePublicUrl]);
+  }, [audioBase64, audioUrl, driveFileId, publicDriveFileId, drivePublicUrl]);
 
   useEffect(() => {
     const audio = audioRef.current;

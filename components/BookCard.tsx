@@ -14,7 +14,9 @@ const BookCard: React.FC<BookCardProps> = ({ book, onOpen, onEdit, onDelete, can
   const totalParts = book.chapters.reduce((acc, chapter) => acc + chapter.parts.length, 0);
   const narratedParts = book.chapters.reduce(
     (acc, chapter) =>
-      acc + chapter.parts.filter((part) => part.audioBase64 || part.drivePublicUrl || part.driveFileId).length,
+      acc +
+      chapter.parts.filter((part) => part.audioBase64 || part.audioUrl || part.drivePublicUrl || part.driveFileId)
+        .length,
     0
   );
 

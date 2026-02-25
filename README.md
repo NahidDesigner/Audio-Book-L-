@@ -11,6 +11,7 @@ Lumina Studio is a mobile-first audiobook creation app.
 - Play parts individually or autoplay chapter queue
 - Analyze chapters with Gemini summary + questions
 - Upload generated MP3 files to Google Drive and stream them back
+- Persist migration-safe audio metadata (`audioUrl` + Drive IDs), so moving Supabase does not require re-generation
 - Persist shared library in Supabase (same data for all visitors)
 - PWA-ready on mobile (manifest + service worker + home screen install support)
 

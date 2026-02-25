@@ -120,7 +120,23 @@ where dst.device_id = 'public-library'
 5. Play audio and confirm Drive streaming works.
 6. On mobile, verify browser shows `Add to Home Screen` / `Install app`.
 
-## 7) Common Issues
+## 7) Moving to Another Supabase Later (No Audio Re-Generation)
+
+When migrating to a new Supabase project, keep these part fields in JSON:
+
+- `audioUrl`
+- `driveFileId`
+- `drivePublicUrl`
+
+If those fields are preserved, existing generated audio stays playable after migration.
+
+After migration and deploy:
+
+1. Login as admin.
+2. Connect Google Drive.
+3. Click `Repair Public Audio` once to refresh public sharing/URLs if needed.
+
+## 8) Common Issues
 
 Blank or empty library:
 
