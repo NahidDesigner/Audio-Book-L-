@@ -1369,41 +1369,72 @@ const App: React.FC = () => {
             </div>
 
             <div className="chapter-list">
+              {selectedBook.chapters.length > 0 && (
+                <div className="chapter-list-notice">
+                  <Play size={14} />
+                  Chapters marked <strong>Ready to listen</strong> already have playable audio.
+                </div>
+              )}
+
               {selectedBook.chapters.length === 0 && (
                 <div className="empty-state">No chapters yet. Add one to start building narration.</div>
               )}
 
-              {selectedBook.chapters.map((chapter) => (
-                <article key={chapter.id} className="chapter-card">
-                  <button
-                    className="chapter-open"
-                    onClick={() => {
-                      setSelectedChapterId(chapter.id);
-                      setActivePartId(null);
-                    }}
-                  >
-                    <h3>{chapter.title}</h3>
-                    <p>
-                      {chapter.parts.length} parts
-                      {chapter.summary ? ' • Insights available' : ''}
-                    </p>
-                  </button>
+              {selectedBook.chapters.map((chapter) => {
+                const narratedParts = chapter.parts.filter((part) => canPlayPart(part)).length;
+                const totalParts = chapter.parts.length;
+                const hasNarration = narratedParts > 0;
+                const narrationProgress = totalParts > 0 ? Math.round((narratedParts / totalParts) * 100) : 0;
 
-                  {isAdmin && (
+                const openChapter = () => {
+                  setSelectedChapterId(chapter.id);
+                  setActivePartId(null);
+                };
+
+                return (
+                  <article key={chapter.id} className={hasNarration ? 'chapter-card ready' : 'chapter-card'}>
+                    <button className="chapter-open" onClick={openChapter}>
+                      <div className="chapter-open-head">
+                        <h3>{chapter.title}</h3>
+                        <span className={hasNarration ? 'chapter-audio-badge ready' : 'chapter-audio-badge pending'}>
+                          {hasNarration ? 'Ready to listen' : 'Audio pending'}
+                        </span>
+                      </div>
+
+                      <p>
+                        {totalParts} parts • {narratedParts} playable
+                        {chapter.summary ? ' • Insights available' : ''}
+                      </p>
+
+                      {totalParts > 0 && (
+                        <div className="chapter-audio-meter" aria-hidden="true">
+                          <span style={{ width: `${narrationProgress}%` }} />
+                        </div>
+                      )}
+                    </button>
+
                     <div className="chapter-card-actions">
-                      <button className="soft-btn" onClick={() => openEditChapter(chapter.id)}>
-                        <PencilLine size={15} />
+                      <button className={hasNarration ? 'soft-btn' : 'ghost-btn'} onClick={openChapter}>
+                        <Play size={14} /> {hasNarration ? 'Listen' : 'Open'}
                       </button>
-                      <button
-                        className="danger-btn"
-                        onClick={() => setDeleteTarget({ type: 'chapter', id: chapter.id })}
-                      >
-                        <Trash2 size={15} />
-                      </button>
+
+                      {isAdmin && (
+                        <>
+                          <button className="soft-btn" onClick={() => openEditChapter(chapter.id)}>
+                            <PencilLine size={15} />
+                          </button>
+                          <button
+                            className="danger-btn"
+                            onClick={() => setDeleteTarget({ type: 'chapter', id: chapter.id })}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </>
+                      )}
                     </div>
-                  )}
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           </section>
         )}

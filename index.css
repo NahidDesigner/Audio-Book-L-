@@ -297,6 +297,22 @@ button {
   margin-top: 16px;
 }
 
+.chapter-list-notice {
+  border: 1px solid rgba(95, 208, 197, 0.35);
+  background: rgba(95, 208, 197, 0.1);
+  color: #def6f2;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+}
+
+.chapter-list-notice strong {
+  color: #f6fdff;
+}
+
 .chapter-card {
   border: 1px solid var(--border-soft);
   border-radius: 14px;
@@ -308,11 +324,43 @@ button {
   gap: 10px;
 }
 
+.chapter-card.ready {
+  border-color: rgba(95, 208, 197, 0.55);
+  box-shadow: 0 0 0 1px rgba(95, 208, 197, 0.18);
+}
+
 .chapter-open {
   background: transparent;
   text-align: left;
   flex: 1;
   padding: 2px;
+}
+
+.chapter-open-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chapter-audio-badge {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.chapter-audio-badge.ready {
+  color: #dcfaf5;
+  border: 1px solid rgba(95, 208, 197, 0.45);
+  background: rgba(95, 208, 197, 0.16);
+}
+
+.chapter-audio-badge.pending {
+  color: #d5e2ef;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .chapter-open h3 {
@@ -323,9 +371,28 @@ button {
   font-size: 0.82rem;
 }
 
+.chapter-audio-meter {
+  margin-top: 8px;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.chapter-audio-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-secondary), #78b9ff);
+}
+
 .chapter-card-actions {
   display: flex;
   gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .content-grid {
@@ -760,6 +827,37 @@ button {
 
   .section-actions-wrap {
     justify-content: flex-start;
+  }
+
+  .chapter-list-notice {
+    display: flex;
+    width: 100%;
+  }
+
+  .chapter-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .chapter-open {
+    width: 100%;
+  }
+
+  .chapter-open-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .chapter-card-actions {
+    justify-content: flex-start;
+  }
+
+  .chapter-card-actions .soft-btn,
+  .chapter-card-actions .ghost-btn,
+  .chapter-card-actions .danger-btn {
+    padding: 7px 9px;
+    border-radius: 8px;
+    font-size: 0.78rem;
   }
 
   .book-grid {
